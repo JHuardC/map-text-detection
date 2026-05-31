@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools >= 77.0.3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "map-text-extraction"
+version = "0.0.0.dev"
+requires-python = ">=3.14.0"
+description = "Developer install for map text extraction related functions."
+license = "Unlicense"
+classifiers = ["Programming Language :: Python :: 3"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
