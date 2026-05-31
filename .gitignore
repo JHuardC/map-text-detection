@@ -1,3 +1,5 @@
 .env
 **/*.tif
 .vscode/*.*
+data/*.csv
+data/*.txt
