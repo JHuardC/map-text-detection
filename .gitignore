@@ -3,4 +3,5 @@
 .vscode/*.*
 data/*.csv
 data/*.txt
+data/*.tab
 *.egg-info
