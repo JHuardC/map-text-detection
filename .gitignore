@@ -7,3 +7,4 @@ data/*.tab
 data/*.gpkg
 data/*.json
 *.egg-info
+__pycache__
