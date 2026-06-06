@@ -9,3 +9,5 @@ data/*.json
 data/tiffs
 *.egg-info
 __pycache__
+outputs/**/*.*
+!outputs/**/.gitkeep
