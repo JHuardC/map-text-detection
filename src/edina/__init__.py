@@ -1,2 +1,3 @@
 from ._parse_tab import parse_edina_tab_file
 from ._geo_transforms import get_transformer_from_geodataframe
+from ._tiffs_to_pngs import EDINATiffPNGConverter
