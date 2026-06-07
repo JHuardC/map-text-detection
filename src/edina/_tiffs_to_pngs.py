@@ -4,7 +4,6 @@ Converts directory of EDINA tiff files to PNGs.
 # Imports
 from typing import Final
 from logging import getLogger
-from copy import copy
 from collections.abc import Iterable
 from pathlib import Path
 import progressbar
@@ -19,6 +18,7 @@ from rasterio.crs import CRS
 progressbar.streams.flush()
 
 logger = getLogger(name = __name__)
+logger.propagate = True
 
 _WIDGETS: Final[list] = [
     ' [', progressbar.widgets.Counter(format='%(value)d of %(max_value)d'),
@@ -300,26 +300,19 @@ class EDINATiffPNGConverter:
         well known text (WKT) format.
         """
         # Argument check for png_dest
-        if not png_dest.is_dir():
+        if png_dest.is_file():
             raise ValueError(
-                "png_dest argument must be a directory, not an individual "
+                "png_dest argument must be a directory, not an individual "\
                 "file."
             )
-        # count number of tiff files being read
-        try:
-            length = sum(1 for _ in iter(copy(tiff_paths)))
-        except TypeError as e:
-            # This error tends to occur when the tiff_paths argument is
-            # a generator, which cannot be copied; we have to convert
-            # tiff_paths to list to get the number of tiff files being
-            # read.
-            tiff_paths = [*tiff_paths]
-            length = len(tiff_paths)
+        
+        tiff_paths = [*iter(tiff_paths)]
 
         # Construct progressbar
         progress = progressbar\
-            .ProgressBar(0, length, _WIDGETS, prefix = "Read Tiffs:")
+            .ProgressBar(0, len(tiff_paths), _WIDGETS, prefix = "Read Tiffs:")
 
+        control_points_meta = []
         try:
             # start cycling through tiffs
             tiff_paths = iter(tiff_paths)
@@ -328,7 +321,7 @@ class EDINATiffPNGConverter:
 
             tiffarr, transformer, crs, self._hw =\
                 self._get_raster_data(tiff_path)
-            progress.increment()
+            progress.increment(1)
             
             # store arguments for deriving row-col split indices.
             args = (
@@ -341,7 +334,6 @@ class EDINATiffPNGConverter:
             )
             pxl_rc_split_idxs = self._get_pixel_rowcol_idxs(*args)
 
-            contol_points_meta = []
             for idx, (row, col) in enumerate(pxl_rc_split_idxs, start = 1):
                 # derive png filename
                 png_filename = f"{tiff_path.stem}-{idx}.png"
@@ -359,15 +351,19 @@ class EDINATiffPNGConverter:
                 # Add crs to metadata
                 for point in ctrl_points:
                     point["crs"] = crs.to_wkt()
-                contol_points_meta += ctrl_points
+                control_points_meta += ctrl_points
                 img.save(png_dest.joinpath(png_filename))
+                logger.info(
+                    f"Image {png_dest.joinpath(png_filename).stem} saved "\
+                    "out."
+                )
 
             while 1:
 
                 tiff_path = next(tiff_paths)
                 tiffarr, transformer, crs, hw =\
                     self._get_raster_data(tiff_path)
-                progress.increment()
+                progress.increment(1)
                 
                 # Check new tiff has same height-width dimensions as the
                 # previous tiff
@@ -403,7 +399,8 @@ class EDINATiffPNGConverter:
                     # Add crs to metadata
                     for point in ctrl_points:
                         point["crs"] = crs.to_wkt()
-                    contol_points_meta += ctrl_points
+                    control_points_meta += ctrl_points
+                    # Save image out
                     img.save(png_dest.joinpath(png_filename))
                     logger.info(
                         f"Image {png_dest.joinpath(png_filename).stem} saved "\
@@ -412,9 +409,10 @@ class EDINATiffPNGConverter:
 
         except StopIteration as _:
             progress.finish()
+            pass
         except Exception as e:
             progress.finish(dirty = True)
             raise
 
         # Convert control points records to GeoDataFrame
-        return GeoDataFrame.from_records(contol_points_meta)
+        return GeoDataFrame.from_records(control_points_meta)
