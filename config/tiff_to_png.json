@@ -1,5 +1,8 @@
 {
-    "png_height": 2000,
-    "png_width": 2000,
-    "overlap": 400
+    "png_h": 2000,
+    "png_w": 2000,
+    "overlap": 400,
+    "start_h": 0,
+    "start_w": 0,
+    "relative_path": "PROJECT_DIR"
 }
