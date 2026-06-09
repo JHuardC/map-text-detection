@@ -8,6 +8,9 @@ from pathlib import Path
 from dotenv import find_dotenv, load_dotenv
 from os import getenv, environ
 import progressbar
+from pandas import DataFrame
+from geopandas import GeoDataFrame
+from edina import get_transformer_from_geodataframe
 
 progressbar.streams.flush()
 progressbar.streams.wrap_stderr()
@@ -23,11 +26,37 @@ _CONFIG_DIR: Final[Path]
 _CONFIG_DIR = PROJECT_DIR.joinpath(f"config/{FILENAME}.json")
 _PRESET: Final = dict(relative_path = "PROJECT_DIR")
 
+_WIDGETS: Final[list] = [
+    ' [', progressbar.widgets.Counter(format='%(value)d of %(max_value)d'),
+    ' (', progressbar.widgets.Percentage(), ')] ',
+    progressbar.widgets.GranularBar(),
+    ' ', progressbar.Timer(), ' | ',
+     progressbar.ETA(), '|'
+]
+
 # Funtions
-def parse_path(path: str, relative_to_envar: str) -> Path:
+def parse_path(path: str, relative_to_envar: str | None = None) -> Path:
+    """
+    Utility function used to derive a path variable in conjunction with
+    paths stored as environment variables.
+
+    Parameters
+    ----------
+    path: str.
+        Required. Path string.
+
+    ralative_to_envar: str or None. Default: None.
+        Optional. Environment variable to use as the root that the
+        `path` argument is considered relative to. If no argument is
+        passed, then no environment variable will be called.
+    
+    Return
+    ------
+    Path.
+    """
     # Convert path argument to a Path instance
     path: Path = Path(path)
-    if path.is_absolute():
+    if path.is_absolute() or (relative_to_envar is None):
         # Directly return absolute path
         return path
     # Get relative to path component
@@ -40,6 +69,65 @@ def parse_path(path: str, relative_to_envar: str) -> Path:
         raise ValueError(msg) from None
     return Path(root).joinpath(path)
 
+
+def get_pixel_xy(
+    coords_df: GeoDataFrame, control_points_df: GeoDataFrame
+) -> DataFrame:
+    """
+    Get pixel values for each coordinate in `coords_df`, using
+    `control_points_df`.
+
+    Parameters
+    ----------
+    coords_df: GeoDataFrame.
+        Required. GeoDataFrame containing Point coordinates we seek to
+        obtain pixel row and column indexes for. The GeoDataFrame
+        requires the fields:
+            - png_filename: str. Which PNG the geospatial coordinate
+            belongs to, used to reference the correct control points.
+            - geometry: Point. Geospatial coordinate to convert to
+            pixel row and column values.
+
+    coords_df: GeoDataFrame.
+        Required. GeoDataFrame containing Ground Control Point
+        coordinates used for georefencing PNG files. The GeoDataFrame
+        requires the fields:
+            - png_filename: str. Which PNG the Ground Control Points
+            belong to.
+            - geometry: Point. Ground Control Geospatial coordinate.
+    """
+    check = set(coords_df["png_filename"])\
+        .difference(control_points_df["png_filename"])
+    if len(check):
+        raise ValueError(
+            f"Missing control points for {len(check)} records. Compare PNG "\
+            "filenames to check."
+        )
+    # Construct progressbar
+    progress = progressbar\
+        .ProgressBar(0, len(coords_df), _WIDGETS, prefix = "Get pixel idxs:")
+    
+    xy = []
+    # cycle through coords
+    progress.start()
+    try:
+        for row in coords_df.itertuples(index = False):
+            # Constrain control_points_df to specific png and get
+            # Geo-Transformer
+            gcptrans = get_transformer_from_geodataframe(control_points_df.loc[
+                control_points_df["png_filename"] == row.png_filename
+            ])
+            xy.append(gcptrans.rowcol(row.geometry.x, row.geometry.y))
+            progress.increment()
+    except Exception as e:
+        progress.finish(dirty = True)
+        raise
+    progress.finish()
+    # return row-column values as a DataFrame
+    return DataFrame(
+        data = xy, index = coords_df.index, columns = ["pixel_x", "pixel_y"]
+    )
+
 if __name__ == "__main__":
     # Imports
     from argparse import ArgumentParser, RawDescriptionHelpFormatter
@@ -47,8 +135,7 @@ if __name__ == "__main__":
     from datetime import datetime
     from json import load as load_json
     from pyogrio.errors import DataLayerError
-    from geopandas import\
-        read_file as geo_read_file, GeoDataFrame, points_from_xy, sjoin
+    from geopandas import read_file as geo_read_file, points_from_xy, sjoin
     from pandas import read_csv as pandas_read_csv
 
     parser = ArgumentParser(
@@ -101,7 +188,7 @@ if __name__ == "__main__":
             "relative paths will be set against the path variable specified "\
             "in the config. If no argument is provided the data will be "\
             "saved as a geopckage -- text-locations.gpkg -- in the same "\
-            "directory the PNGs were fread from."
+            "directory the control points metadata file was read from."
     )
     parser.add_argument(
         "-c", "--config",
@@ -224,17 +311,20 @@ if __name__ == "__main__":
             "Building bounding boxes from PNG control points to search for "\
             "gb1900 toponymns within."
         )
-        georef_df = georef_df[["tiff_filename", "png_filename", "geometry"]]
-        georef_df = georef_df\
-            .dissolve(by = ["tiff_filename", "png_filename"], as_index = False)
-        georef_df["geometry"] = georef_df.geometry.convex_hull
+        png_bounds = georef_df[["tiff_filename", "png_filename", "geometry"]]\
+            .dissolve(by = ["tiff_filename","png_filename"], as_index = False)
+        png_bounds["geometry"] = png_bounds.geometry.convex_hull
 
         logger.info("Merging GB1900 toponyms with png bounds")
-        gb1900 = sjoin(gb1900, georef_df, "inner")\
+        gb1900 = sjoin(gb1900, png_bounds, "inner")\
             .drop(columns = ["index_right"])\
             .reset_index(drop = True)
+        del png_bounds
         
-        logger.debug("Saving selected gb1900 map text points out")
+        logger.info("Get pixel values for each for each gazetteer point.")
+        gb1900[["pixel_x", "pixel_y"]] = get_pixel_xy(gb1900, georef_df)
+        
+        logger.debug("Saving selected gb1900 map text points out.")
         gb1900.to_file(out_fp)
 
     except Exception as e:
