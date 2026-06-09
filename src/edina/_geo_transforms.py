@@ -20,6 +20,13 @@ def get_transformer_from_geodataframe(gdf: GeoDataFrame) -> GCPTransformer:
         row-column values to coordinates using .xy() method; convert
         coordinates to pixel row-column values using .rowcol() method.
     """
+    # Check all pixel coordinate values are unique
+    if gdf.duplicated(["pixel_x", "pixel_y"]).any():
+        raise ValueError(
+            "GeoDataFrame contains duplicate control points. Each record "\
+            "in the GeoDataFrame should contain unique 'pixel_x', pixel_y "\
+            "pairs."
+        )
     # Generate collection of ground control points
     gcps: tuple[GroundControlPoint] = tuple(
         GroundControlPoint(
@@ -31,5 +38,4 @@ def get_transformer_from_geodataframe(gdf: GeoDataFrame) -> GCPTransformer:
         for tup in gdf.itertuples(index = False)
     )
     # Create GCPTransformer instance
-    transformer = GCPTransformer(gcps = gcps, tps = True)
-    return transformer
+    return GCPTransformer(gcps = gcps, tps = True)
