@@ -7,5 +7,5 @@
     "gb1900_x": "osgb_east",
     "gb1900_y": "osgb_north",
     "gb1900_crs": "EPSG:27700",
-    "relative_path": "PROJECT_DIR"
+    "relative_path": "LOCAL_DIR"
 }

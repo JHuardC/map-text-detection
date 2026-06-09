@@ -5,5 +5,5 @@
     "crs": "EPSG:27700",
     "start_h": 0,
     "start_w": 0,
-    "relative_path": "PROJECT_DIR"
+    "relative_path": "LOCAL_DIR"
 }
