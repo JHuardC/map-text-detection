@@ -42,7 +42,7 @@ def parse_path(path: str, relative_to_envar: str) -> Path:
 if __name__ == "__main__":
     # Imports
     from argparse import ArgumentParser, RawDescriptionHelpFormatter
-    from logging import getLogger, StreamHandler, FileHandler
+    from logging import getLogger, StreamHandler, FileHandler, Formatter
     from datetime import datetime
     from json import load as load_json
     from edina import EDINATiffPNGConverter
@@ -128,9 +128,15 @@ if __name__ == "__main__":
 
     logger = getLogger()
     logger.setLevel(10)
+    # Format
+    fmt = Formatter(
+        "[%(asctime)s] - %(levelname)s - %(filename)s - Line %(lineno)d - "\
+        "%(funcName)s: %(message)s"
+    )
     # Stream to terminal
     f = StreamHandler()
     f.setLevel(cla_args.stream_level)
+    f.setFormatter(fmt)
     logger.addHandler(f)
     # Optionally log to file
     if cla_args.file:
@@ -139,6 +145,7 @@ if __name__ == "__main__":
         )
         f = FileHandler(f, mode = "w")
         f.setLevel(10)
+        f.setFormatter(fmt)
         logger.addHandler(f)
     
     try:
@@ -184,6 +191,7 @@ if __name__ == "__main__":
             "png_h": config["png_h"],
             "png_w": config["png_w"],
             "overlap": config["overlap"],
+            "to_crs": config.get("crs"),
             "start_h": config["start_h"],
             "start_w": config["start_w"]
         }

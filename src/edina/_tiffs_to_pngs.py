@@ -10,6 +10,7 @@ import progressbar
 from numpy import ndarray
 from shapely import Point
 from PIL.Image import Image, fromarray as image_fromarray
+from pandas import concat as pd_concat
 from geopandas import GeoDataFrame
 from rasterio import open as open_raster
 from rasterio.transform import AffineTransformer
@@ -98,7 +99,7 @@ class EDINATiffPNGConverter:
         Splits image array and converts into sub-arrays into pngs and
         provides control points metadata.
         """
-        contol_points_meta = [
+        control_points_meta = [
             {
                 "tiff_filename": tiff_filename,
                 "png_filename": png_filename,
@@ -111,7 +112,25 @@ class EDINATiffPNGConverter:
         img = img_arr[0, row: row + png_h, col: col + png_w].copy()
         img = image_fromarray(obj = img, mode =  "L")
 
-        return img, contol_points_meta
+        return img, control_points_meta
+    
+    def _create_georef_df(
+        self,
+        control_point_records: list[dict[str, str | int | Point]],
+        crs: CRS,
+        to_crs: str | None = None
+    ) -> GeoDataFrame:
+        # Convert control points records to GeoDataFrame
+        gdf = GeoDataFrame.from_records(control_point_records)
+        
+        if to_crs is None:
+            # if no crs conversion, then record current crs using WKT
+            gdf["crs"] = crs.to_wkt()
+        else:
+            gdf = gdf.set_crs(crs).to_crs(to_crs)
+        
+        return gdf
+        
         
     def convert_tiff_to_pngs(
         self,
@@ -120,6 +139,7 @@ class EDINATiffPNGConverter:
         png_h: int | None = None,
         png_w: int | None = None,
         overlap: int = 0,
+        to_crs: str | None = None,
         start_h: int = 0,
         start_w: int = 0
     ) -> GeoDataFrame:
@@ -153,6 +173,10 @@ class EDINATiffPNGConverter:
             Optional. Number of pixels adjacent PNGs will overlap by
             (both horizontally and vertically adjacent PNGs overlap by
             the same amount).
+
+        to_crs: str or None. Default: None.
+            Optional. If an argument is provided, convert the crs of the
+            control points for georeferencing the PNGs.
         
         start_h: int. Default: 0.
             Optional. Specify where to start splits along the vertical
@@ -190,7 +214,7 @@ class EDINATiffPNGConverter:
             *hw, png_h, png_w, overlap, start_h, start_w
         )
 
-        contol_points_meta = []
+        control_points_meta = []
         for idx, (row, col) in enumerate(pixel_rowcol_split_idxs, start = 1):
             # derive png filename
             if png_dest.is_dir():
@@ -217,18 +241,14 @@ class EDINATiffPNGConverter:
                 tiff_path.name,
                 png_filename
             )
-            contol_points_meta += ctrl_points
+            control_points_meta += ctrl_points
             img.save(png_dest.joinpath(png_filename))
             logger.info(
                 f"Image {png_dest.joinpath(png_filename).stem} saved out"
             )
 
         # Convert control points records to GeoDataFrame
-        contol_points_meta = GeoDataFrame\
-            .from_records(contol_points_meta)\
-            .set_crs(crs)
-        
-        return contol_points_meta
+        return self._create_georef_df(control_points_meta, crs, to_crs)
 
     def convert_batch_tiff_to_pngs(
         self,
@@ -237,6 +257,7 @@ class EDINATiffPNGConverter:
         png_h: int | None = None,
         png_w: int | None = None,
         overlap: int = 0,
+        to_crs: str | None = None,
         start_h: int = 0,
         start_w: int = 0
     ) -> GeoDataFrame:
@@ -271,6 +292,10 @@ class EDINATiffPNGConverter:
             Optional. Number of pixels adjacent PNGs will overlap by
             (both horizontally and vertically adjacent PNGs overlap by
             the same amount).
+
+        to_crs: str or None. Default: None.
+            Optional. If an argument is provided, convert the crs of the
+            control points used to georeference the PNGs.
         
         start_h: int. Default: 0.
             Optional. Specify where to start splits along the vertical
@@ -307,12 +332,15 @@ class EDINATiffPNGConverter:
             )
         
         tiff_paths = [*iter(tiff_paths)]
+        if len(tiff_paths) == 0:
+            raise ValueError(
+                "No tiff files found in tiff_paths iterable passed"
+            )
 
         # Construct progressbar
         progress = progressbar\
             .ProgressBar(0, len(tiff_paths), _WIDGETS, prefix = "Read Tiffs:")
-
-        control_points_meta = []
+        control_points_meta = None
         try:
             # start cycling through tiffs
             tiff_paths = iter(tiff_paths)
@@ -334,6 +362,7 @@ class EDINATiffPNGConverter:
             )
             pxl_rc_split_idxs = self._get_pixel_rowcol_idxs(*args)
 
+            control_points_records = []
             for idx, (row, col) in enumerate(pxl_rc_split_idxs, start = 1):
                 # derive png filename
                 png_filename = f"{tiff_path.stem}-{idx}.png"
@@ -348,15 +377,16 @@ class EDINATiffPNGConverter:
                     tiff_path.name,
                     png_filename
                 )
-                # Add crs to metadata
-                for point in ctrl_points:
-                    point["crs"] = crs.to_wkt()
-                control_points_meta += ctrl_points
+                control_points_records += ctrl_points
                 img.save(png_dest.joinpath(png_filename))
                 logger.info(
                     f"Image {png_dest.joinpath(png_filename).stem} saved "\
                     "out."
                 )
+
+            # Convert control points records to GeoDataFrame
+            control_points_meta =\
+                self._create_georef_df(control_points_records, crs, to_crs)
 
             while 1:
 
@@ -381,7 +411,7 @@ class EDINATiffPNGConverter:
                     )
                     pxl_rc_split_idxs = self._get_pixel_rowcol_idxs(*args)
                 
-                
+                control_points_records = []
                 for idx, (row, col) in enumerate(pxl_rc_split_idxs, start = 1):
                     # derive png filename
                     png_filename = f"{tiff_path.stem}-{idx}.png"
@@ -396,10 +426,7 @@ class EDINATiffPNGConverter:
                         tiff_path.name,
                         png_filename
                     )
-                    # Add crs to metadata
-                    for point in ctrl_points:
-                        point["crs"] = crs.to_wkt()
-                    control_points_meta += ctrl_points
+                    control_points_records += ctrl_points
                     # Save image out
                     img.save(png_dest.joinpath(png_filename))
                     logger.info(
@@ -407,12 +434,16 @@ class EDINATiffPNGConverter:
                         "out."
                     )
 
+                # Convert control points records to GeoDataFrame
+                control_points_meta = pd_concat([
+                    control_points_meta,
+                    self._create_georef_df(control_points_records, crs, to_crs)
+                ])
+
         except StopIteration as _:
             progress.finish()
-            pass
         except Exception as e:
             progress.finish(dirty = True)
             raise
-
         # Convert control points records to GeoDataFrame
-        return GeoDataFrame.from_records(control_points_meta)
+        return control_points_meta
