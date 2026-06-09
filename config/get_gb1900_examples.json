@@ -1,0 +1,11 @@
+{
+    "meta_geopackage_layer": null,
+    "gb1900_read_csv_kwargs": {
+        "usecols": ["pin_id", "final_text", "nation", "osgb_east", "osgb_north"],
+        "encoding": "utf_16_le"
+    },
+    "gb1900_x": "osgb_east",
+    "gb1900_y": "osgb_north",
+    "gb1900_crs": "EPSG:27700",
+    "relative_path": "PROJECT_DIR"
+}
