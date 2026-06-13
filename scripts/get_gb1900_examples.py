@@ -88,12 +88,16 @@ def get_pixel_xy(
             - geometry: Point. Geospatial coordinate to convert to
             pixel row and column values.
 
-    coords_df: GeoDataFrame.
+    control_points_df: GeoDataFrame.
         Required. GeoDataFrame containing Ground Control Point
         coordinates used for georefencing PNG files. The GeoDataFrame
         requires the fields:
             - png_filename: str. Which PNG the Ground Control Points
             belong to.
+            - pixel_x: int. Column index associated with the records
+            control point.
+            - pixel_y: int. Row index associated with the records
+            control point.
             - geometry: Point. Ground Control Geospatial coordinate.
     """
     check = set(coords_df["png_filename"])\
