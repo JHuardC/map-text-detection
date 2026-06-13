@@ -103,11 +103,12 @@ class EDINATiffPNGConverter:
             {
                 "tiff_filename": tiff_filename,
                 "png_filename": png_filename,
-                "pixel_x": x,
-                "pixel_y": y,
+                "pixel_x": i * (png_w - 1),
+                "pixel_y": j * (png_h - 1),
                 "geometry": Point(transformer.xy(x, y))
             }
-            for x in [col, col + png_w] for y in [row, row + png_h]
+            for i, x in enumerate([col, col + png_w - 1])
+            for j, y in enumerate([row, row + png_h - 1])
         ]
         img = img_arr[0, row: row + png_h, col: col + png_w].copy()
         img = image_fromarray(obj = img, mode =  "L")
