@@ -1,0 +1,5 @@
+{
+    "deepsolo_config_path": "Models/config_96voc.yaml",
+    "deepsolo_model_path": "Models/finetune_v2/model.pth",
+    "grouper_model_path": "Models/grouper_model_v1_epoch2.pth"
+}
