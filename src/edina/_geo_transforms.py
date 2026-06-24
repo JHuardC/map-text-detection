@@ -38,4 +38,4 @@ def get_transformer_from_geodataframe(gdf: GeoDataFrame) -> GCPTransformer:
         for tup in gdf.itertuples(index = False)
     )
     # Create GCPTransformer instance
-    return GCPTransformer(gcps = gcps, tps = True)
+    return GCPTransformer(gcps = gcps, tps = False)

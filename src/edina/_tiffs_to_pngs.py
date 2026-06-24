@@ -105,10 +105,10 @@ class EDINATiffPNGConverter:
                 "png_filename": png_filename,
                 "pixel_x": i * (png_w - 1),
                 "pixel_y": j * (png_h - 1),
-                "geometry": Point(transformer.xy(x, y))
+                "geometry": Point(transformer.xy(r, c))
             }
-            for i, x in enumerate([col, col + png_w - 1])
-            for j, y in enumerate([row, row + png_h - 1])
+            for i, c in enumerate([col, col + png_w - 1])
+            for j, r in enumerate([row, row + png_h - 1])
         ]
         img = img_arr[0, row: row + png_h, col: col + png_w].copy()
         img = image_fromarray(obj = img, mode =  "L")
@@ -322,8 +322,9 @@ class EDINATiffPNGConverter:
         coordinate stored in geometry.
         - "geometry": shapely.Point. Contains the coordinates for the
         control points encoded under the crs provided.
-        - "crs": str. Coordinate Reference System for control points in
-        well known text (WKT) format.
+        - "crs": str. Optional. If no crs argument is provided then
+        this field contains the coordinate Reference System for control
+        points in well known text (WKT) format.
         """
         # Argument check for png_dest
         if png_dest.is_file():
