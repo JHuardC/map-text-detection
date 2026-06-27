@@ -68,6 +68,7 @@ def convert_ToponymExtractor_outputs_to_gdf(
         - wordid: int. Order the word record belongs to within the
         toponym group. Count starts at 0.
         - word: string. Parsed text from the ToponymExtractor.
+        - score: string. Confidence score for the predicted word.
         - geometry: Polygon. Mask for the associated text, coordinates
         are in OSGB36 format (EPSG:27700).
     2. DataFrame. Records log images that ToponymExtractor did not
@@ -95,7 +96,8 @@ def convert_ToponymExtractor_outputs_to_gdf(
                             "png_filename": image["image"],
                             "groupid": i,
                             "wordid": j,
-                            "word": word["text"]
+                            "word": word["text"],
+                            "score": word["score"]
                         }
 
                         # Get georeference control points transformer
@@ -108,8 +110,11 @@ def convert_ToponymExtractor_outputs_to_gdf(
                             # Convert pixel location coordinates to latitude/
                             # longitude and create geometry field
                             record["geometry"] = Polygon([
-                                gcp_trans.xy(x, y) for x, y in word["vertices"]
+                                gcp_trans.xy(r, c) for c, r in word["vertices"]
                             ])
+                            # Documentation recommends calling close on
+                            # GCPTransformer after calling transforms
+                            gcp_trans.close()
                         else:
                             logger.warning(
                                 f"Georeferencing control points not found "\
