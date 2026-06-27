@@ -113,7 +113,9 @@ if __name__ == "__main__":
         help =\
             "Required. Path to geopackage (.gpkg) file containing the "\
             "control points used for georeferencing the images passed to the "\
-            "ToponymExtractor model. Can provide relative or absolute paths; "\
+            "ToponymExtractor model. Dataset must include fields: "\
+            "\"tiff_filename\", \"png_filename\", \"pixel_x\", \"pixel_y\", "\
+            "and \"geometry\". Can provide relative or absolute paths; "\
             "relative paths will be set against path variable specified in "\
             "config."
     )
