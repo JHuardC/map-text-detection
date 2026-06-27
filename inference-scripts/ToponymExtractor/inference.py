@@ -237,6 +237,42 @@ class ToponymExtractor:
         return self.toponyms
 
 
+def to_rumsey_format(toponyms, map_rel_path):
+    '''
+    returns {
+        "image": map_rel_path,
+        "groups": [ # Begin a list of phrase groups for the image
+            [ # Begin a list of words for the phrase
+                {"vertices": [[x1, y1], [x2, y2], ..., [xN, yN]], "text": "TEXT1", "score": float},
+                ...,
+                {"vertices": [[x1, y1], [x2, y2], ..., [xN, yN]], "text": "TEXT2", "score": float}
+            ],
+            ...
+            [ {"vertices": [[x1, y1], [x2, y2], ..., [xN, yN]], "text": "TEXT3", "score": float}, ... ]
+        ]
+    }
+    '''
+    result = {
+        "image": map_rel_path,
+        "groups": []
+    }
+    for t in toponyms:
+        group = t['group']
+        new_group = []
+        for w in group:
+            polygon_x = w['polygon_x']
+            polygon_y = w['polygon_y']
+            vertices = [[polygon_x[i], polygon_y[i]] for i in range(len(polygon_x))]
+            new_group.append({
+                'vertices': vertices,
+                'text': w['text'],
+                'score': w['score']
+            })
+        result['groups'].append(new_group)
+
+    return result
+
+
 if __name__ == "__main__":
 
     
@@ -302,12 +338,7 @@ if __name__ == "__main__":
     
     # Get output directory
     out_dir = Path(args.output)
-    if not out_dir.is_file():
-        raise ValueError(
-            f"output argument not recognised as a file. "\
-            f"Argument: {args.output}"
-        )
-    elif out_dir.suffix != ".pkl":
+    if out_dir.suffix != ".pkl":
         raise ValueError(
             f"output argument not recognised as a pickle file, determined "\
             f"by suffix. Argument: {args.output}"
@@ -317,7 +348,7 @@ if __name__ == "__main__":
         try:
             extractor = ToponymExtractor({**cfg, **{"img_path": str(path)}})
             toponyms = extractor.run()
-            toponyms = rr.to_rumsey_format(toponyms, path.name)
+            toponyms = to_rumsey_format(toponyms, path.name)
         except Exception as e:
             print(f"ERROR encountered for {path.name}: {repr(e)}")
             toponyms = {"image": path.name, "error": repr(e)}
