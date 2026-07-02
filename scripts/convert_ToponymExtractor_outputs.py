@@ -153,7 +153,7 @@ if __name__ == "__main__":
             "to split tiffs into pngs. Can provide either a relative or "\
             "absolute path; relative paths will be set relative to the "\
             "project root directory. If no argument is provided, will "\
-            "attempt to load config from 'config/tiff_to_png.json', " \
+            f"attempt to load config from 'config/{FILENAME}.json', " \
             "relative to project root folder."
     )
     parser.add_argument(
@@ -241,7 +241,10 @@ if __name__ == "__main__":
 
         logger.debug("Convert model predictions.")
         geodata, errors = convert_ToponymExtractor_outputs_to_gdf(
-            out = predictions, control_points = ctrl_points
+            out = predictions,
+            control_points = ctrl_points,
+            png_h = config["png_h"],
+            png_w = config["png_w"]
         )
         logger.debug("Save error data out.")
         errors.to_csv(save_err_fp)
