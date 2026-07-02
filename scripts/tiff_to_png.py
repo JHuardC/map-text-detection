@@ -101,7 +101,7 @@ if __name__ == "__main__":
             "to split tiffs into pngs. Can provide either a relative or "\
             "absolute path; relative paths will be set relative to the "\
             "project root directory. If no argument is provided, will "\
-            "attempt to load config from 'config/tiff_to_png.json', " \
+            f"attempt to load config from 'config/{FILENAME}.json', " \
             "relative to project root folder."
     )
     parser.add_argument(
