@@ -5,7 +5,7 @@ from typing import Any
 from pathlib import Path
 from shapely import Polygon, Point
 from numpy import ndarray, hstack, floor as np_floor, ceil as np_ceil
-from PIL.Image import Image, fromarray as image_fromarray
+from PIL.Image import Image, fromarray as image_fromarray, new as new_image
 from rasterio import open as open_raster
 from rasterio.transform import AffineTransformer
 from pandas import concat, Series
@@ -151,10 +151,26 @@ def get_intersecting_polygon_pairs(predictions: GeoDataFrame) -> GeoDataFrame:
 
 class ProcessToponymExtractorPredictions:
     def __init__(
-        self,
-        ctrl_points: GeoDataFrame,
-        tiff_dir: Path
+        self, ctrl_points: GeoDataFrame, tiff_dir: Path, img_h: int, img_w: int
     ):
+        """
+        Post-process ToponymExtractor outputs
+
+        Parameters
+        ----------
+        ctrl_points: GeoDataFrame.
+            Required. Contains the georeferencing control points for
+            each image passed to the ToponymExtractor model.
+        tiff_dir: Path.
+            Required. Directory path to the Edina downnloaded tiff
+            files.
+        img_h: int.
+            Required. Standardised height dimension to pad the
+            undetermined image snippets out to.
+        img_w: int.
+            Required. Standardised width dimension to pad the
+            undetermined image snippets out to.
+        """
         self._tiff_height: int
         self._tiff_width: int
         self._tiff_transformer: AffineTransformer
@@ -162,6 +178,8 @@ class ProcessToponymExtractorPredictions:
         self._tiff_data: ndarray
         self._undetermined: dict[str, list[Image|tuple[int,int]]|GeoDataFrame]
         self._clique_count: int
+        self.img_h: int
+        self.img_w: int
 
         # Get mask of overlapping space for each TIFF
         png_overlaps = get_png_overlaps(ctrl_points = ctrl_points)
@@ -169,7 +187,13 @@ class ProcessToponymExtractorPredictions:
             .dissolve("tiff_filename", as_index = False)
         self.tif_overlaps["geometry"] = self.tif_overlaps.geometry.buffer(0)
         # store tiff directory
+        if not tiff_dir.is_dir():
+            raise ValueError(
+                f"Argument passed to tiff_dir is not a directory: {tiff_dir}"
+            )
         self.tiff_directory: Path = tiff_dir
+        # store standardized image sizes
+        self.img_h, self.img_w = img_h, img_w
 
     def _get_tiff_details(self, tiff_fn: str) -> None:
         tiff_fp = self.tiff_directory.joinpath(tiff_fn)
@@ -205,6 +229,14 @@ class ProcessToponymExtractorPredictions:
 
 
     def _process_indeterminant_predictions(self, gdf: GeoDataFrame) -> None:
+        """
+        Edits _current_predictions GeoDataFrame attribute,
+        _suppressed_predictions GeoDataFrame attribute, and the 
+        _undetermined dictionary.
+        """
+        if len(gdf) == 0:
+            # Nothing to process
+            return None
         # Get all instances of overlapping predictions
         selection = gdf.index.union(gdf.index_right).unique().sort_values()
         pred_words = self._current_predictions.loc[selection]
@@ -387,8 +419,15 @@ class ProcessToponymExtractorPredictions:
         `_suppressed_predictions` GeoDataFrame attribute and an
         `_undetermined` dictionary.
         """
+        if len(gdf) == 0:
+            # Nothing more to process
+            return None
         # Keep predctions with IoU scores less than or equal to .1
         gdf = gdf[gdf.iou > .1]
+
+        if len(gdf) == 0:
+            # Nothing more to process
+            return None
         # Apply non-maximal supression for masks with the same text
         # labels
         selection = ((gdf.iou >= .8) & (gdf.word_left == gdf.word_right))
@@ -404,6 +443,10 @@ class ProcessToponymExtractorPredictions:
         gdf = gdf.loc[~selection]
         gdf = gdf.loc[gdf.index.difference(suppress_idxs)]
 
+        if len(gdf) == 0:
+            # Nothing more to process
+            return None
+
         # Get indeterminate predictions
         self._process_indeterminant_predictions(gdf = gdf)
         
@@ -413,6 +456,9 @@ class ProcessToponymExtractorPredictions:
         Edits the `_current_predictions` GeoDataFrame attribute, and the
         `_suppressed_predictions` GeoDataFrame attribute.
         """
+        if len(gdf) == 0:
+            # Nothing more to process
+            return None
         # Apply non-maximal supression for IoU greater than .8
         selection = gdf.loc[(gdf.iou >= .8), "index_right"].tolist()
         self._suppressed_predictions = concat(
@@ -432,6 +478,9 @@ class ProcessToponymExtractorPredictions:
         `_suppressed_predictions` GeoDataFrame attribute, and the
         `_undetermined` dictionary attribute.
         """
+        if len(gdf) == 0:
+            # Nothing more to process
+            return None
         # Suppress "subset" predictions when words are the same
         selection = (gdf.word_left == gdf.word_right)
         suppression_idxs = gdf.loc[selection, "index_right"].to_list()
@@ -446,8 +495,18 @@ class ProcessToponymExtractorPredictions:
             .loc[self._current_predictions.index.difference(suppression_idxs)]
         # update gdf
         gdf = gdf.loc[~selection]
+        gdf = gdf.loc[gdf.index.difference(suppression_idxs)]
+        
+        if len(gdf) == 0:
+            # Nothing more to process
+            return None
+        
         # Keep predictions where IoU is less than .1
         gdf = gdf.loc[gdf.iou >= .1]
+        
+        if len(gdf) == 0:
+            # Nothing more to process
+            return None
 
         # Suppress "subset" strings contained within the "intersect" prediction
         selection = [
@@ -470,14 +529,78 @@ class ProcessToponymExtractorPredictions:
             .loc[self._current_predictions.index.difference(suppression_idxs)]
         # Update gdf
         gdf = gdf.loc[~selection]
+        gdf = gdf.loc[gdf.index.difference(suppression_idxs)]
+        
+        if len(gdf) == 0:
+            # Nothing more to process
+            return None
 
         # Get indeterminate predictions
         self._process_indeterminant_predictions(gdf = gdf)
 
 
+    def _pad_image_snippets(self) -> None:
+        if (size := len(self._undetermined["image"])) == 0:
+            # Nothing to pad
+            return None
+        for idx in range(size):
+            img: Image = self._undetermined["image"].pop(idx)
+            padded_img = new_image(
+                mode = img.mode, size = (self.img_w, self.img_h), color = 255
+            )
+            padded_img.paste(im = img, box = (0, 0))
+            self._undetermined["image"].insert(idx, padded_img)
+
+
     def process_predictions(
         self, tiff_fn: str, predictions: GeoDataFrame
-    ):
+    ) -> tuple[
+        GeoDataFrame,
+        GeoDataFrame,
+        dict[str, list[Image | tuple[int, int]] | GeoDataFrame]
+    ]:
+        """
+        Post-processes ToponymExtractor outputs. Suppresses overlapping
+        predictions from overlapping pngs.
+
+        Parameters
+        ----------
+        tiff_fn: str.
+            Required. Filename for the tiff file the predictions were
+            derived from, with the .tif extension.
+        predicitons: GeoDataFrame.
+            Required. GeoDataFrame containing the word predictions and
+            their associated polygon masks, derived from a specific tiff
+            file whose filename is passed to `tiff_fn`. Must include the
+            fields: "png_filename", "groupid", "word", "score", and
+            "geometry".
+        
+        Returns
+        -------
+        3-element tuple:
+
+        1. GeoDataFrame. Word predictions with their associated polygon
+        masks that were not suppressed.
+        2. GeoDataFrame. Suppressed word predictions with their
+        associated polygon masks.
+        3. Dictionary. Contains an undetermined collection of words and
+        their associated metadata required to be passed back to the
+        ToponymExtractor. Items include:
+        - "image": List of PIL.Image objects. Images containing the map
+        text segments that were undetermined. These images contain the
+        group text the undetermined words belonged to. These images are
+        padded up to a standardized height and width.
+        - "image_hw": List of int, int tuples. Height and width of the
+        image snippets containing the undetermined text. These are the
+        unpadded dimensions.
+        - "control_points": GeoDataFrame. Contains the georeferencing
+        control points for the image snippets. Contains the fields:
+        "clique_idx", "pixel_x", "pixel_y", and "geometry".
+        - "word_groups": GeoDataFrame. Contains the text instances
+        suppressed for each image snippet. Contains the same fields that
+        were contained within the `predictions` GeoDataFrame, alongside
+        the "clique_idx" field.
+        """
         # Get tiff image details
         self._get_tiff_details(tiff_fn = tiff_fn)
 
@@ -539,6 +662,7 @@ class ProcessToponymExtractorPredictions:
         self._process_intercept_subset_predictions(
             intersect_subset_predictions
         )
+        self._pad_image_snippets()
         return (
             self._current_predictions,
             self._suppressed_predictions,
