@@ -9,6 +9,7 @@ https://github.com/SesamePaste233/ToponymExtractor/tree/main
 from typing import Final
 from logging import getLogger
 import progressbar
+from numpy import array, clip
 from geopandas import GeoDataFrame
 from pandas import DataFrame
 from edina import get_transformer_from_geodataframe
@@ -29,7 +30,9 @@ _WIDGETS: Final[list] = [
 
 def convert_ToponymExtractor_outputs_to_gdf(
     out: list[dict[str, str | list[list[dict[str, str | list[list[float]]]]]]],
-    control_points: GeoDataFrame
+    control_points: GeoDataFrame,
+    png_h: int,
+    png_w: int
 ) -> tuple[GeoDataFrame, DataFrame]:
     """
     Create GeoDataFrame from ToponymExtractor outputs.
@@ -55,6 +58,13 @@ def convert_ToponymExtractor_outputs_to_gdf(
         Required. GeoDataFrame containing the details of the control
         points used for georeferencing each png. GeoDataFrame requires
         the fields: "png_filename", "pixel_x", "pixel_y", "geometry".
+    png_h: int.
+        Required. Height dimension of the image passed to the
+        ToponymExtractor model. Needed to clip image vertices.
+    png_w: int.
+        Required. Width dimension of the image passed to the
+        ToponymExtractor model. Needed to clip image vertices.
+    
 
     Returns
     -------
@@ -99,6 +109,13 @@ def convert_ToponymExtractor_outputs_to_gdf(
                             "word": word["text"],
                             "score": word["score"]
                         }
+                        # Clip vertices to within the bounds of image
+                        vertices = array(word["vertices"])
+                        vertices[:, 0] =\
+                            clip(vertices[:, 0], 0., float(png_w - 1))
+                        vertices[:, 1] =\
+                            clip(vertices[:, 1], 0., float(png_h - 1))
+                        vertices = vertices.tolist()
 
                         # Get georeference control points transformer
                         gcp_trans = control_points.loc[
@@ -110,7 +127,7 @@ def convert_ToponymExtractor_outputs_to_gdf(
                             # Convert pixel location coordinates to latitude/
                             # longitude and create geometry field
                             record["geometry"] = Polygon([
-                                gcp_trans.xy(r, c) for c, r in word["vertices"]
+                                gcp_trans.xy(r, c) for c, r in vertices
                             ])
                             # Documentation recommends calling close on
                             # GCPTransformer after calling transforms
