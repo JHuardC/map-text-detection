@@ -409,46 +409,56 @@ class ProcessToponymExtractorPredictions:
         )
         self._current_predictions = self._current_predictions\
             .loc[self._current_predictions.index.difference(word_groups.index)]
+        
+
+    def _update_gdf_current_suppressed(
+        self, gdf: GeoDataFrame, selection: Series
+    ) -> GeoDataFrame:
+        """
+        Edits overlapping predicitions GeoDataFrame `gdf`,
+        `_current_predictions` GeoDataFrame attribute, and
+        `_suppressed_predictions` GeoDataFrame attribute.
+        """
+        # Edit suppressed predictions GeoDataFrame with new predictions being
+        # suppressed
+        suppress_idxs = gdf.loc[selection, "index_right"].tolist()
+        self._suppressed_predictions = concat(
+            [
+                self._current_predictions.loc[suppress_idxs],
+                self._suppressed_predictions
+            ],
+            axis = 0
+        )
+        # Remove suppressed predictions from current predictions GeoDataFrame
+        self._current_predictions = self._current_predictions\
+            .loc[self._current_predictions.index.difference(suppress_idxs)]
+        # Remove records of overlapping predictions for suppressed predictions
+        gdf = gdf.loc[~gdf.index_right.isin(suppress_idxs)]
+        gdf = gdf.loc[gdf.index.difference(suppress_idxs)]
+        return gdf
 
 
-    def _process_intercept_intercept_predictions(
+    def _process_intersect_intersect_predictions(
         self, gdf: GeoDataFrame
     ) -> None:
         """
-        Edits `_current_predictions` GeoDataFrame attribute. Creates
-        `_suppressed_predictions` GeoDataFrame attribute and an
+        Edits `_current_predictions` GeoDataFrame attribute,
+        `_suppressed_predictions` GeoDataFrame attribute and
         `_undetermined` dictionary.
         """
-        if len(gdf) == 0:
-            # Nothing more to process
-            return None
         # Keep predctions with IoU scores less than or equal to .1
         gdf = gdf[gdf.iou > .1]
-
-        if len(gdf) == 0:
-            # Nothing more to process
-            return None
         # Apply non-maximal supression for masks with the same text
         # labels
         selection = ((gdf.iou >= .8) & (gdf.word_left == gdf.word_right))
-        suppress_idxs = gdf.loc[selection, "index_right"].tolist()
+        if selection.sum():
+            gdf = self._update_gdf_current_suppressed(
+                gdf = gdf, selection = selection
+            )
 
-        # Log predictions that are removed and update _current_predictions
-        self._suppressed_predictions =\
-            self._current_predictions.loc[suppress_idxs].copy()
-        self._current_predictions = self._current_predictions\
-            .loc[self._current_predictions.index.difference(suppress_idxs)]
-        
-        # Update gdf
-        gdf = gdf.loc[~selection]
-        gdf = gdf.loc[gdf.index.difference(suppress_idxs)]
-
-        if len(gdf) == 0:
-            # Nothing more to process
-            return None
-
-        # Get indeterminate predictions
-        self._process_indeterminant_predictions(gdf = gdf)
+        if len(gdf):
+            # Get indeterminate predictions
+            self._process_indeterminant_predictions(gdf = gdf)
         
 
     def _process_subset_subset_predictions(self, gdf: GeoDataFrame) -> None:
@@ -456,20 +466,10 @@ class ProcessToponymExtractorPredictions:
         Edits the `_current_predictions` GeoDataFrame attribute, and the
         `_suppressed_predictions` GeoDataFrame attribute.
         """
-        if len(gdf) == 0:
-            # Nothing more to process
-            return None
         # Apply non-maximal supression for IoU greater than .8
-        selection = gdf.loc[(gdf.iou >= .8), "index_right"].tolist()
-        self._suppressed_predictions = concat(
-            [
-                self._suppressed_predictions,
-                self._current_predictions.loc[selection]
-            ],
-            axis = 0
-        )
-        self._current_predictions = self._current_predictions\
-            .loc[self._current_predictions.index.difference(selection)]
+        selection = (gdf.iou >= .8)
+        if selection.sum():
+            self._update_gdf_current_suppressed(gdf=gdf, selection=selection)
         
 
     def _process_intercept_subset_predictions(self, gdf: GeoDataFrame) -> None:
@@ -478,36 +478,14 @@ class ProcessToponymExtractorPredictions:
         `_suppressed_predictions` GeoDataFrame attribute, and the
         `_undetermined` dictionary attribute.
         """
-        if len(gdf) == 0:
-            # Nothing more to process
-            return None
         # Suppress "subset" predictions when words are the same
         selection = (gdf.word_left == gdf.word_right)
-        suppression_idxs = gdf.loc[selection, "index_right"].to_list()
-        self._suppressed_predictions = concat(
-            [
-                self._suppressed_predictions,
-                self._current_predictions.loc[suppression_idxs]
-            ],
-            axis = 0
-        )
-        self._current_predictions = self._current_predictions\
-            .loc[self._current_predictions.index.difference(suppression_idxs)]
-        # update gdf
-        gdf = gdf.loc[~selection]
-        gdf = gdf.loc[gdf.index.difference(suppression_idxs)]
-        
-        if len(gdf) == 0:
-            # Nothing more to process
-            return None
-        
+        if selection.sum():
+            gdf = self._update_gdf_current_suppressed(
+                gdf = gdf, selection = selection
+            )
         # Keep predictions where IoU is less than .1
-        gdf = gdf.loc[gdf.iou >= .1]
-        
-        if len(gdf) == 0:
-            # Nothing more to process
-            return None
-
+        gdf = gdf[(gdf.iou >= .1)]
         # Suppress "subset" strings contained within the "intersect" prediction
         selection = [
             (
@@ -517,26 +495,13 @@ class ProcessToponymExtractorPredictions:
             for tup in gdf.itertuples()
         ]
         selection = Series(selection, index = gdf.index, dtype = "bool")
-        suppression_idxs = gdf.loc[selection, "index_right"].to_list()
-        self._suppressed_predictions = concat(
-            [
-                self._suppressed_predictions,
-                self._current_predictions.loc[suppression_idxs]
-            ],
-            axis = 0
-        )
-        self._current_predictions = self._current_predictions\
-            .loc[self._current_predictions.index.difference(suppression_idxs)]
-        # Update gdf
-        gdf = gdf.loc[~selection]
-        gdf = gdf.loc[gdf.index.difference(suppression_idxs)]
-        
-        if len(gdf) == 0:
-            # Nothing more to process
-            return None
-
-        # Get indeterminate predictions
-        self._process_indeterminant_predictions(gdf = gdf)
+        if selection.sum():
+            gdf = self._update_gdf_current_suppressed(
+                gdf = gdf, selection = selection
+            )
+        if len(gdf):
+            # Get indeterminate predictions
+            self._process_indeterminant_predictions(gdf = gdf)
 
 
     def _pad_image_snippets(self) -> None:
@@ -604,7 +569,10 @@ class ProcessToponymExtractorPredictions:
         # Get tiff image details
         self._get_tiff_details(tiff_fn = tiff_fn)
 
-        # initialize undetermined attribute
+        # initialised suppressed predictions attribute
+        self._suppressed_predictions = GeoDataFrame()
+
+        # initialize undetermined predictions attribute
         self._undetermined = {
             "image": [],
             "image_hw": [],
@@ -618,6 +586,7 @@ class ProcessToponymExtractorPredictions:
             .loc[self.tif_overlaps["tiff_filename"] == tiff_fn, "geometry"]\
             .iloc[0]
         
+        # Initialize current predictions log (retained predictions)
         # Sort predictions by confidence score - descending
         self._current_predictions: GeoDataFrame = predictions\
             .sort_values("score", ascending = False, ignore_index = True)
@@ -635,7 +604,7 @@ class ProcessToponymExtractorPredictions:
             intersect_intersect_predictions.index
             < intersect_intersect_predictions.index_right
         )]
-        self._process_intercept_intercept_predictions(
+        self._process_intersect_intersect_predictions(
             intersect_intersect_predictions
         )
 
