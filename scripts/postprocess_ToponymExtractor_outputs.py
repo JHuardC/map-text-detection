@@ -74,7 +74,7 @@ def parse_path(path: str, relative_to_envar: str | None = None) -> Path:
 
 def build_image_strip(
     img: ndarray,
-    clique: int,
+    img_meta: dict[str, str | list[tuple[int, int]] | list[int]],
     clique_image_iter: Iterator[tuple[int, ndarray]],
     pad_h: int,
     pad_w: int,
@@ -97,9 +97,14 @@ def build_image_strip(
     ----------
     img: numpy ndarray.
         Required. Array representing the left-most image of a new strip.
-    clique: int.
-        Required. Index value representing the word clique for the `img`
-        paramter.
+    img_meta: dictionary.
+        Required. Dictionary containing fields:
+        - "shapes": list of tuple[int, int]. Image snippet array shapes,
+        without padding.
+        - "cliques": list of ints. Clique indices associated with each
+        image snippet.
+        - "col_pos": list of ints. Column index where the associated
+        snippet starts within the overall image strip.
     clique_image_iter: Iterator of tuples containing ints and ndarrays.
         Required. Iterator which outputs img snippets and their
         associated clique indices.
@@ -138,16 +143,14 @@ def build_image_strip(
     - "col_pos": list of ints. Column index where the associated snippet
     starts within the overall image strip.
     """
-    # initialize metadata dictionary with details of first image in strip
-    metadata = {"shapes": [img.shape], "cliques": [clique], "col_pos": [0]}
     while ((clique_img := next(clique_image_iter, None)) is not None):
         clique_idx, snippet = clique_img
         if (pad := max_w - (img.shape[1] + snippet.shape[1])) >= 0:
             # Add snippet to current strip
             # fill out metadata
-            metadata["shapes"].append(snippet.shape)
-            metadata["cliques"].append(clique_idx)
-            metadata["col_pos"].append(img.shape[1])
+            img_meta["shapes"].append(snippet.shape)
+            img_meta["cliques"].append(clique_idx)
+            img_meta["col_pos"].append(img.shape[1])
 
             # Add column padding to snippet (up to max width)
             pad = pad_w if pad > pad_w else pad
@@ -191,16 +194,7 @@ def build_image_strip(
                 mode = "constant",
                 constant_values = pad_fill_value
             )
-            # pad snippet width
-            pad = max_w - snippet.shape[1]
-            pad = pad_w if (pad > pad_w) else pad
-            snippet = pad_array(
-                snippet,
-                pad_width = ((0, 0), (0, pad)),
-                mode = "constant",
-                constant_values = pad_fill_value
-            )
-            return (img, clique_image_iter, (clique_idx, snippet), metadata)
+            return (img, clique_image_iter, (clique_idx, snippet), img_meta)
     
     # extend strip image to required width
     pad = max_w - img.shape[1]
@@ -210,7 +204,7 @@ def build_image_strip(
         mode = "wrap"
     )
     
-    return (img, None, clique_img, metadata)
+    return (img, None, clique_img, img_meta)
 
 
 if __name__ == "__main__":
@@ -576,7 +570,9 @@ if __name__ == "__main__":
 
                 # unpack tuple
                 clique_idx, ambiguous_img = clique_img
-                meta[fn]["row_pos"].append(0)
+                meta[fn]["shapes"].append(ambiguous_img.shape)
+                meta[fn]["cliques"].append(clique_idx)
+                meta[fn]["col_pos"].append(0)
 
                 # add padding to initial image
                 pad = (
@@ -606,7 +602,7 @@ if __name__ == "__main__":
                 ambiguous_img, img_iter, clique_img, meta_strip =\
                     build_image_strip(
                         img = ambiguous_img,
-                        clique = clique_idx,
+                        img_meta = meta[fn],
                         clique_image_iter = img_iter,
                         pad_h = pad_h,
                         pad_w = pad_w,
@@ -615,20 +611,34 @@ if __name__ == "__main__":
                     )
                 
                 # update metadata
-                meta[fn]["shapes"].extend(meta_strip["shapes"])
-                meta[fn]["cliques"].extend(meta_strip["cliques"])
-                meta[fn]["col_pos"].extend(meta_strip["col_pos"])
+                meta[fn] = meta_strip
                 # update metadata row positions
-                meta[fn]["row_pos"] *= len(meta[fn]["col_pos"])
+                meta[fn]["row_pos"] = [0] * len(meta[fn]["col_pos"])
 
                 while clique_img is not None:
                     # unpack tuple
                     clique_idx, img_snippet = clique_img
+                    meta_strip = {
+                        "shapes": [img_snippet.shape],
+                        "cliques": [clique_idx],
+                        "col_pos": [0]
+                    }
 
-                    # add padding to height of image snippet
+                    # add padding to width and height of image snippet
+                    pad = (
+                        pad_w
+                        if (pad := (max_w - img_snippet.shape[1])) > pad_w
+                        else pad
+                    )
+                    img_snippet = pad_array(
+                        img_snippet,
+                        pad_width = ((0, 0), (0, pad)),
+                        mode = "constant",
+                        constant_values = 0
+                    )
                     pad = (
                         pad_h
-                        if (pad := (max_h - ambiguous_img.shape[0])) > pad_w
+                        if (pad := (max_h - img_snippet.shape[0])) > pad_w
                         else pad
                     )
                     img_snippet = pad_array(
@@ -642,7 +652,7 @@ if __name__ == "__main__":
                     img_strip, img_iter, clique_img, meta_strip =\
                         build_image_strip(
                             img = img_snippet,
-                            clique = clique_idx,
+                            img_meta = meta_strip,
                             clique_image_iter = img_iter,
                             pad_h = pad_h,
                             pad_w = pad_w,
@@ -669,8 +679,8 @@ if __name__ == "__main__":
                         ambiguous_img = img_strip.copy()
                         idx += 1
                         fn = f"{tiff_fp.stem}-ambiguous-{idx}.png"
-                        meta = {fn: {**meta_strip}}
-                        meta[fn]["row_pos"] = [0] * len(meta["col_pos"])
+                        meta = {fn: {"tiff_stem": tiff_fp.stem, **meta_strip}}
+                        meta[fn]["row_pos"] = [0] * len(meta[fn]["col_pos"])
                     else:
                         # update metadata
                         meta[fn]["shapes"].extend(meta_strip["shapes"])
