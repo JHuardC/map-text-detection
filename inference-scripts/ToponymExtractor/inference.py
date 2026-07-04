@@ -1,5 +1,5 @@
 """
-Performs inference on ToponymExtractor:
+Performs inference on ToponymExtractor. Saves outputs as a FIFO queue.
 
 https://github.com/SesamePaste233/ToponymExtractor/tree/main
 """
@@ -344,7 +344,9 @@ if __name__ == "__main__":
             f"by suffix. Argument: {args.output}"
         )
 
-    for path in img_dir.glob("*.png"):
+    img_paths = [*img_dir.glob("*.png")]
+    modes = ["wb"] + (["ab"] * (len(img_paths) - 1))
+    for path, mode in zip(img_paths, modes):
         try:
             extractor = ToponymExtractor({**cfg, **{"img_path": str(path)}})
             toponyms = extractor.run()
@@ -353,5 +355,5 @@ if __name__ == "__main__":
             print(f"ERROR encountered for {path.name}: {repr(e)}")
             toponyms = {"image": path.name, "error": repr(e)}
         # Save output
-        with open(out_dir, mode = "ab") as f:
+        with open(out_dir, mode = mode) as f:
             pickle.dump(toponyms, f)
