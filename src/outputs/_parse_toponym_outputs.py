@@ -28,7 +28,133 @@ _WIDGETS: Final[list] = [
      progressbar.ETA(), '|'
 ]
 
-def convert_ToponymExtractor_outputs_to_gdf(
+def _convert_ToponymExtractor_outputs_to_gdf_without_geotransforms(
+    out: list[dict[str, str | list[list[dict[str, str | list[list[float]]]]]]],
+    png_h: int,
+    png_w: int
+) -> tuple[GeoDataFrame, DataFrame]:
+    """
+    Create GeoDataFrame from ToponymExtractor outputs.
+
+    ToponymExtractor sourced from:
+    https://github.com/SesamePaste233/ToponymExtractor/tree/main
+
+    Parameters
+    ----------
+    out: ToponymExtractor outputs.
+        Required. ToponymExtractor outputs are saved in ICDAR 2025
+        map text dataset format, which is a list of dictionaries:
+            - "image": string. Name of image png the associated outputs
+            are inferenced from.
+            - "groups": list of list of dictionaries. Each list of
+            dictionaries is a toponym - a collection of captured words
+            or characters. Each dictionary contains:
+                - "vertices": list of list of floats. Pixel x, y
+                locations representing the corners for the corresponding
+                text masks.
+                - "text": string. Parsed text read from the map.
+    png_h: int.
+        Required. Height dimension of the image passed to the
+        ToponymExtractor model. Needed to clip image vertices.
+    png_w: int.
+        Required. Width dimension of the image passed to the
+        ToponymExtractor model. Needed to clip image vertices.
+    
+
+    Returns
+    -------
+    Two element tuple:
+    1. GeoDataFrame. Extracted data, each record represents a word with
+    the associated mask. Columns are:
+        - png_filename: string. Name of image png the associated outputs
+        are inferenced from.
+        - groupid: int. Which toponym the word record belongs to. Count
+        starts at 0.
+        - wordid: int. Order the word record belongs to within the
+        toponym group. Count starts at 0.
+        - word: string. Parsed text from the ToponymExtractor.
+        - score: string. Confidence score for the predicted word.
+        - geometry: Polygon. Mask for the associated text, coordinates
+        are in OSGB36 format (EPSG:27700).
+    2. DataFrame. Records log images that ToponymExtractor did not
+    produce outputs for due to errors at inference time. Columns are:
+        - png_filename: string. Name of image png the ToponymExtractor
+        errored on during inference.
+        - error: string. Details the error that was thrown.
+    """
+    pngs, errors, data = set(), [], []
+    progress = progressbar\
+        .progressbar(out, widgets = _WIDGETS, prefix = "Reading predictions:")
+    for image in progress:
+        # Check record has not been seen before
+        if image["image"] not in pngs:
+            # Update seen pngs log
+            pngs.add(image["image"])
+
+            # some records errored out - so only upack those with expected
+            # formats
+            if isinstance(image.get("groups"), list):
+                for i, group in enumerate(image["groups"]):
+                    for j, word in enumerate(group):
+                        # Create record
+                        record = {
+                            "png_filename": image["image"],
+                            "groupid": i,
+                            "wordid": j,
+                            "word": word["text"],
+                            "score": word["score"]
+                        }
+                        # Clip vertices to within the bounds of image
+                        vertices = array(word["vertices"])
+                        vertices[:, 0] =\
+                            clip(vertices[:, 0], 0., float(png_w - 1))
+                        vertices[:, 1] =\
+                            clip(vertices[:, 1], 0., float(png_h - 1))
+                        vertices = vertices.tolist()
+
+                        record["geometry"] = Polygon(vertices).buffer(0)
+                        
+                        # Add record to data
+                        data.append(record)
+
+            elif "groups" in image:
+                # Error handling - Format 1
+                errors.append({
+                    "png_filename": image["image"],
+                    "error": image["groups"] + " - unspecified error."
+                })
+            elif "error" in image:
+                # Error handling - Format 2
+                errors.append({
+                    "png_filename": image["image"], "error": image["error"]
+                })
+            else:
+                # Error handling - catch all
+                errors.append({
+                    "png_filename": image["image"],
+                    "error": "Parsing error - Unrecognised format."
+                })
+
+    # Convert record lists to frames
+    data, errors = GeoDataFrame(data), DataFrame(errors)
+
+    # log parsing details
+    pngs = data["png_filename"].nunique()
+    toponyms = int(data.groupby("png_filename")["groupid"].nunique().sum())
+    words = len(data)
+    logger.info(
+        f"Outputs extracted for {pngs:,} PNGs: {words:,} text instances "\
+        f"detected across {toponyms:,} groups (toponymns). "\
+        f"{data["geometry"].isna().sum():,} records missing masks."
+    )
+    if len(errors):
+        logger\
+            .info(f"Encountered error records for {len(errors)} PNG records.")
+
+    return data, errors
+
+
+def _convert_ToponymExtractor_outputs_to_gdf_with_geotransforms(
     out: list[dict[str, str | list[list[dict[str, str | list[list[float]]]]]]],
     control_points: GeoDataFrame,
     png_h: int,
@@ -178,3 +304,78 @@ def convert_ToponymExtractor_outputs_to_gdf(
             .info(f"Encountered error records for {len(errors)} PNG records.")
 
     return data, errors
+
+
+def convert_ToponymExtractor_outputs_to_gdf(
+    out: list[dict[str, str | list[list[dict[str, str | list[list[float]]]]]]],
+    png_h: int,
+    png_w: int,
+    control_points: GeoDataFrame | None = None
+) -> tuple[GeoDataFrame, DataFrame]:
+    """
+    Create GeoDataFrame from ToponymExtractor outputs.
+
+    ToponymExtractor sourced from:
+    https://github.com/SesamePaste233/ToponymExtractor/tree/main
+
+    Parameters
+    ----------
+    out: ToponymExtractor outputs.
+        Required. ToponymExtractor outputs are saved in ICDAR 2025
+        map text dataset format, which is a list of dictionaries:
+            - "image": string. Name of image png the associated outputs
+            are inferenced from.
+            - "groups": list of list of dictionaries. Each list of
+            dictionaries is a toponym - a collection of captured words
+            or characters. Each dictionary contains:
+                - "vertices": list of list of floats. Pixel x, y
+                locations representing the corners for the corresponding
+                text masks.
+                - "text": string. Parsed text read from the map.
+    png_h: int.
+        Required. Height dimension of the image passed to the
+        ToponymExtractor model. Needed to clip image vertices.
+    png_w: int.
+        Required. Width dimension of the image passed to the
+        ToponymExtractor model. Needed to clip image vertices.
+    control_points: GeoDataFrame or None.
+        Optional. GeoDataFrame containing the details of the control
+        points used for georeferencing each png. GeoDataFrame requires
+        the fields: "png_filename", "pixel_x", "pixel_y", "geometry". If
+        no control points are passed, then polygons are not
+        georeferenced.
+
+    Returns
+    -------
+    Two element tuple:
+    1. GeoDataFrame. Extracted data, each record represents a word with
+    the associated mask. Columns are:
+        - png_filename: string. Name of image png the associated outputs
+        are inferenced from.
+        - groupid: int. Which toponym the word record belongs to. Count
+        starts at 0.
+        - wordid: int. Order the word record belongs to within the
+        toponym group. Count starts at 0.
+        - word: string. Parsed text from the ToponymExtractor.
+        - score: string. Confidence score for the predicted word.
+        - geometry: Polygon. Mask for the associated text, if 
+        georeferencing was applied, then coordinates are in OSGB36
+        format (EPSG:27700), otherwise polygon coordinates are pixel
+        coordinate values.
+    2. DataFrame. Records log images that ToponymExtractor did not
+    produce outputs for due to errors at inference time. Columns are:
+        - png_filename: string. Name of image png the ToponymExtractor
+        errored on during inference.
+        - error: string. Details the error that was thrown.
+    """
+    if control_points is not None:
+        return _convert_ToponymExtractor_outputs_to_gdf_with_geotransforms(
+            out = out,
+            control_points = control_points,
+            png_h = png_h,
+            png_w = png_w
+        )
+    else:
+        return _convert_ToponymExtractor_outputs_to_gdf_without_geotransforms(
+            out = out, png_h = png_h, png_w = png_w
+        )
