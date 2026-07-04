@@ -5,7 +5,7 @@ from typing import Any
 from pathlib import Path
 from shapely import Polygon, Point
 from numpy import ndarray, hstack, floor as np_floor, ceil as np_ceil
-from PIL.Image import Image, fromarray as image_fromarray, new as new_image
+# from PIL.Image import Image, fromarray as image_fromarray, new as new_image
 from rasterio import open as open_raster
 from rasterio.transform import AffineTransformer
 from pandas import concat, Series
@@ -151,7 +151,7 @@ def get_intersecting_polygon_pairs(predictions: GeoDataFrame) -> GeoDataFrame:
 
 class ProcessToponymExtractorPredictions:
     def __init__(
-        self, ctrl_points: GeoDataFrame, tiff_dir: Path, img_h: int, img_w: int
+        self, ctrl_points: GeoDataFrame, tiff_dir: Path
     ):
         """
         Post-process ToponymExtractor outputs
@@ -162,24 +162,17 @@ class ProcessToponymExtractorPredictions:
             Required. Contains the georeferencing control points for
             each image passed to the ToponymExtractor model.
         tiff_dir: Path.
-            Required. Directory path to the Edina downnloaded tiff
-            files.
-        img_h: int.
-            Required. Standardised height dimension to pad the
-            undetermined image snippets out to.
-        img_w: int.
-            Required. Standardised width dimension to pad the
-            undetermined image snippets out to.
+            Required. Directory path to the Edina downloaded tiff files.
         """
         self._tiff_height: int
         self._tiff_width: int
         self._tiff_transformer: AffineTransformer
         self._tiff_crs: Any
         self._tiff_data: ndarray
-        self._undetermined: dict[str, list[Image|tuple[int,int]]|GeoDataFrame]
+        self._undetermined: dict[str, list[ndarray] | GeoDataFrame]
         self._clique_count: int
-        self.img_h: int
-        self.img_w: int
+        # self.img_h: int
+        # self.img_w: int
 
         # Get mask of overlapping space for each TIFF
         png_overlaps = get_png_overlaps(ctrl_points = ctrl_points)
@@ -193,7 +186,7 @@ class ProcessToponymExtractorPredictions:
             )
         self.tiff_directory: Path = tiff_dir
         # store standardized image sizes
-        self.img_h, self.img_w = img_h, img_w
+        # self.img_h, self.img_w = img_h, img_w
 
     def _get_tiff_details(self, tiff_fn: str) -> None:
         tiff_fp = self.tiff_directory.joinpath(tiff_fn)
@@ -202,7 +195,8 @@ class ProcessToponymExtractorPredictions:
             self._tiff_width = src.width # image width
             self._tiff_transformer = AffineTransformer(src.transform)
             self._tiff_crs = src.read_crs() # coordinate reference system
-            self._tiff_data = (-src.read() + 1) * 255 # image array
+            # self._tiff_data = (-src.read() + 1) * 255 # image array
+            self._tiff_data = src.read() # binary array
 
 
     def _add_png_overlap_column(self) -> None:
@@ -341,16 +335,13 @@ class ProcessToponymExtractorPredictions:
         
         # Get image and metadata for each image segment to be passed back
         # to the model
-        undetermined = {"image": [], "image_hw": [], "control_points": []}
+        undetermined = {"image": [], "control_points": []}
         for tup in bboxes.itertuples(index = False):
             # get image snippet
             temp = self._tiff_data[
                 0, tup.min_row: tup.max_row + 1, tup.min_col: tup.max_col + 1
-            ]
-            undetermined["image"].append(
-                image_fromarray(obj = temp, mode =  "L")
-            )
-            undetermined["image_hw"].append(temp.shape)
+            ].copy()
+            undetermined["image"].append(temp)
 
             # create georeferencing control points for image
             undetermined["control_points"].append({
@@ -385,7 +376,6 @@ class ProcessToponymExtractorPredictions:
 
         # update _undetermined attributes
         self._undetermined["image"].extend(undetermined["image"])
-        self._undetermined["image_hw"].extend(undetermined["image_hw"])
         self._undetermined["control_points"] = concat(
             [
                 self._undetermined["control_points"],
@@ -504,17 +494,17 @@ class ProcessToponymExtractorPredictions:
             self._process_indeterminant_predictions(gdf = gdf)
 
 
-    def _pad_image_snippets(self) -> None:
-        if (size := len(self._undetermined["image"])) == 0:
-            # Nothing to pad
-            return None
-        for idx in range(size):
-            img: Image = self._undetermined["image"].pop(idx)
-            padded_img = new_image(
-                mode = img.mode, size = (self.img_w, self.img_h), color = 255
-            )
-            padded_img.paste(im = img, box = (0, 0))
-            self._undetermined["image"].insert(idx, padded_img)
+    # def _pad_image_snippets(self) -> None:
+    #     if (size := len(self._undetermined["image"])) == 0:
+    #         # Nothing to pad
+    #         return None
+    #     for idx in range(size):
+    #         img: Image = self._undetermined["image"].pop(idx)
+    #         padded_img = new_image(
+    #             mode = img.mode, size = (self.img_w, self.img_h), color = 255
+    #         )
+    #         padded_img.paste(im = img, box = (0, 0))
+    #         self._undetermined["image"].insert(idx, padded_img)
 
 
     def process_predictions(
@@ -522,7 +512,7 @@ class ProcessToponymExtractorPredictions:
     ) -> tuple[
         GeoDataFrame,
         GeoDataFrame,
-        dict[str, list[Image | tuple[int, int]] | GeoDataFrame]
+        dict[str, list[ndarray] | GeoDataFrame]
     ]:
         """
         Post-processes ToponymExtractor outputs. Suppresses overlapping
@@ -551,13 +541,9 @@ class ProcessToponymExtractorPredictions:
         3. Dictionary. Contains an undetermined collection of words and
         their associated metadata required to be passed back to the
         ToponymExtractor. Items include:
-        - "image": List of PIL.Image objects. Images containing the map
-        text segments that were undetermined. These images contain the
-        group text the undetermined words belonged to. These images are
-        padded up to a standardized height and width.
-        - "image_hw": List of int, int tuples. Height and width of the
-        image snippets containing the undetermined text. These are the
-        unpadded dimensions.
+        - "image": List of binary ndarrays. Array images containing the
+        map text segments that were undetermined. These images contain
+        the group text the undetermined words belonged to.
         - "control_points": GeoDataFrame. Contains the georeferencing
         control points for the image snippets. Contains the fields:
         "clique_idx", "pixel_x", "pixel_y", and "geometry".
@@ -575,7 +561,6 @@ class ProcessToponymExtractorPredictions:
         # initialize undetermined predictions attribute
         self._undetermined = {
             "image": [],
-            "image_hw": [],
             "control_points": GeoDataFrame(),
             "word_groups": GeoDataFrame()
         }
@@ -631,7 +616,7 @@ class ProcessToponymExtractorPredictions:
         self._process_intercept_subset_predictions(
             intersect_subset_predictions
         )
-        self._pad_image_snippets()
+        # self._pad_image_snippets()
         return (
             self._current_predictions,
             self._suppressed_predictions,
