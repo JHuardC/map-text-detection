@@ -7,10 +7,12 @@ https://github.com/SesamePaste233/ToponymExtractor/tree/main
 """
 # Imports
 from typing import Final
+from collections.abc import Iterator
 from pathlib import Path
 from dotenv import find_dotenv, load_dotenv
 from os import environ
 import progressbar
+from numpy import ndarray, pad as pad_array, concatenate as concat_array, int16
 
 progressbar.streams.flush()
 progressbar.streams.wrap_stderr()
@@ -70,15 +72,157 @@ def parse_path(path: str, relative_to_envar: str | None = None) -> Path:
     return Path(root).joinpath(path)
 
 
+def build_image_strip(
+    img: ndarray,
+    clique: int,
+    clique_image_iter: Iterator[tuple[int, ndarray]],
+    pad_h: int,
+    pad_w: int,
+    max_w: int,
+    pad_fill_value: int = 0,
+) -> tuple[
+    ndarray,
+    Iterator[tuple[int, ndarray]] | None,
+    tuple[int, ndarray] | None,
+    dict[str, list[int] | list[tuple[int, int]]]
+]:
+    """
+    Builds a horizontal strip of combined image snippets with padding.
+
+    Image snippets are sequentially taken from the `clique_image_iter`
+    paramter and concatenates them to `img` along axis 1, with padding
+    `pad_w` between them; upto the width `max_w`.
+
+    Parameters
+    ----------
+    img: numpy ndarray.
+        Required. Array representing the left-most image of a new strip.
+    clique: int.
+        Required. Index value representing the word clique for the `img`
+        paramter.
+    clique_image_iter: Iterator of tuples containing ints and ndarrays.
+        Required. Iterator which outputs img snippets and their
+        associated clique indices.
+    pad_h: int.
+        Required. Pad width added to the end of an image snippet along
+        axis 0.
+    pad_w: int.
+        Required. Pad width added to the end of an image snippet along
+        axis 1.
+    max_w: int.
+        Required. Max width of the image strip.
+    pad_fill_value: int. Default: 0.
+        Optional. Value to fill the padding between image snippets with.
+    
+    Returns
+    -------
+    4-element tuple. The elements are:
+
+    1. ndarray. The image strip: a numpy array of size (n, max_w). The
+    array contains image snippets concatenad along axis 1, with padding
+    between the snippets.
+    2. Iterator or None. The iterator passed to `clique_image_iter` on
+    function call. None is returned if the iterator passed to
+    `clique_image_iter` has been emptied.
+    3. None or a tuple of int and ndarray. Last output from the
+    `clique_image_iter` iterator. The clique index and image array are
+    not part of the returned image strip occupying index 0 of the
+    returned tuple, instead they are the start of a new image strip.
+    None is stored when the iterator has been emptied.
+    4. dictionary. Metadata related to the image snippets contained
+    within the image strip. Contains the items:
+
+    - "shapes": list of tuple[int, int]. Original snippet array shapes.
+    - "cliques": list of ints. Clique indices associated with each
+    snippet.
+    - "col_pos": list of ints. Column index where the associated snippet
+    starts within the overall image strip.
+    """
+    # initialize metadata dictionary with details of first image in strip
+    metadata = {"shapes": [img.shape], "cliques": [clique], "col_pos": [0]}
+    while ((clique_img := next(clique_image_iter, None)) is not None):
+        clique_idx, snippet = clique_img
+        if (pad := max_w - (img.shape[1] + snippet.shape[1])) >= 0:
+            # Add snippet to current strip
+            # fill out metadata
+            metadata["shapes"].append(snippet.shape)
+            metadata["cliques"].append(clique_idx)
+            metadata["col_pos"].append(img.shape[1])
+
+            # Add column padding to snippet (up to max width)
+            pad = pad_w if pad > pad_w else pad
+            snippet = pad_array(
+                snippet,
+                pad_width = ((0, 0), (0, pad)),
+                mode = "constant",
+                constant_values = pad_fill_value
+            )
+            # Add height padding to snippet
+            snippet = pad_array(
+                snippet,
+                pad_width = ((0, pad_h), (0, 0)),
+                mode = "constant",
+                constant_values = pad_fill_value
+            )
+            # Equalize row sizes between img and snippet with height padding
+            pad = img.shape[0] - snippet.shape[0]
+            if pad > 0:
+                snippet = pad_array(
+                    snippet,
+                    pad_width = ((0, pad), (0, 0)),
+                    mode = "constant",
+                    constant_values = pad_fill_value
+                )
+            elif pad < 0:
+                img = pad_array(
+                    img,
+                    pad_width = ((0, -pad), (0, 0)),
+                    mode = "constant",
+                    constant_values = pad_fill_value
+                )
+            # concatenate snippet to image
+            img = concat_array([img, snippet], axis = 1)
+        else:
+            # pad strip image width to max_w
+            pad = max_w - img.shape[1]
+            img = pad_array(
+                img,
+                pad_width = ((0, 0), (0, pad)),
+                mode = "constant",
+                constant_values = pad_fill_value
+            )
+            # pad snippet width
+            pad = max_w - snippet.shape[1]
+            pad = pad_w if (pad > pad_w) else pad
+            snippet = pad_array(
+                snippet,
+                pad_width = ((0, 0), (0, pad)),
+                mode = "constant",
+                constant_values = pad_fill_value
+            )
+            return (img, clique_image_iter, (clique_idx, snippet), metadata)
+    
+    # extend strip image to required width
+    pad = max_w - img.shape[1]
+    img = pad_array(
+        img,
+        pad_width = ((0, 0), (0, pad)),
+        mode = "wrap"
+    )
+    
+    return (img, None, clique_img, metadata)
+
+
 if __name__ == "__main__":
     # Imports
     from argparse import ArgumentParser, RawDescriptionHelpFormatter
     from logging import getLogger, StreamHandler, FileHandler, Formatter
     from datetime import datetime
-    from json import load as load_json
+    from json import load as load_json, dump as dump_json
     from pandas import concat
     from geopandas import read_file, GeoDataFrame
     from outputs import ProcessToponymExtractorPredictions
+    from PIL.Image import fromarray as image_fromarray
 
     parser = ArgumentParser(
         description = __doc__, formatter_class = RawDescriptionHelpFormatter
@@ -154,11 +298,14 @@ if __name__ == "__main__":
         metavar = "to/ambiguous/img/dir",
         help =\
             "Required. Specify directory to save ambiguous predictions' "\
-            "images out to. The images are saved under the filename "\
-            "format \"{tiff filename}-clique-{clique index}.png\"; where "\
+            "images and their asscoiated metadata out to. The images are "\
+            "saved under the filename format "\
+            "\"{tiff filename}-ambiguous-{index}.png\"; where "\
             "{tiff filename} represents the corresponding TIFF filename the "\
-            "image segment is sourced from, and {clique index} represents "\
-            "the unique index for the image segment. Can provide a relative "\
+            "image segment is sourced from, and {index} represents a the "\
+            "unique index for each ambiguous image generated. The associated "\
+            "metadata file is saved under the filename "\
+            "\"{tiff filename}-ambiguous-meta.json\" Can provide a relative "\
             "or absolute path; relative paths will be set relative to the "\
             "path variable specified in config."
     )
@@ -382,9 +529,7 @@ if __name__ == "__main__":
         logger.debug("Initializing predictions post-processor")
         post_processor = ProcessToponymExtractorPredictions(
             ctrl_points = control_points,
-            tiff_dir = tiff_dir,
-            img_h = config["img_h"],
-            img_w = config["img_w"]
+            tiff_dir = tiff_dir
         )
 
         logger.debug("Initialise ambiguous image control points GeoDataFrame")
@@ -413,12 +558,155 @@ if __name__ == "__main__":
                 outputs[1].to_file(
                     suppressed_out.joinpath(f"{tiff_fp.stem}.gpkg")
                 )
-            if len(outputs[2]["image"]):
-                logger.debug("Save ambiguous prediction snippets")
-                for clique_idx, img in enumerate(outputs[2]["image"]):
-                    img.save(ambiguous_img_out.joinpath(
-                        f"{tiff_fp.stem}-clique-{clique_idx}.png"
-                    ))
+            logger.debug("Packaging ambiguous image snippets")
+            if len((images := outputs[2]["image"])):
+                idx: int = 0
+                fn = f"{tiff_fp.stem}-ambiguous-{idx}.png"
+                meta = {fn: {
+                    "tiff_stem": tiff_fp.stem,
+                    "shapes": [],
+                    "cliques": [],
+                    "row_pos": [],
+                    "col_pos": []
+                }}
+                max_h, max_w = config["img_h"], config["img_w"]
+                pad_h, pad_w = config["pad_h"], config["pad_w"]
+                img_iter = iter(enumerate(outputs[2]["image"]))
+                clique_img = next(img_iter, None)
+
+                # unpack tuple
+                clique_idx, ambiguous_img = clique_img
+                meta[fn]["row_pos"].append(0)
+
+                # add padding to initial image
+                pad = (
+                    pad_w
+                    if (pad := (max_w - ambiguous_img.shape[1])) > pad_w
+                    else pad
+                )
+                ambiguous_img = pad_array(
+                    ambiguous_img,
+                    pad_width = ((0, 0), (0, pad)),
+                    mode = "constant",
+                    constant_values = 0
+                )
+                pad = (
+                    pad_h
+                    if (pad := (max_h - ambiguous_img.shape[0])) > pad_w
+                    else pad
+                )
+                ambiguous_img = pad_array(
+                    ambiguous_img,
+                    pad_width = ((0, pad), (0, 0)),
+                    mode = "constant",
+                    constant_values = 0
+                )
+
+                # build initial image strip
+                ambiguous_img, img_iter, clique_img, meta_strip =\
+                    build_image_strip(
+                        img = ambiguous_img,
+                        clique = clique_idx,
+                        clique_image_iter = img_iter,
+                        pad_h = pad_h,
+                        pad_w = pad_w,
+                        max_w = max_w,
+                        pad_fill_value = 0
+                    )
+                
+                # update metadata
+                meta[fn]["shapes"].extend(meta_strip["shapes"])
+                meta[fn]["cliques"].extend(meta_strip["cliques"])
+                meta[fn]["col_pos"].extend(meta_strip["col_pos"])
+                # update metadata row positions
+                meta[fn]["row_pos"] *= len(meta[fn]["col_pos"])
+
+                while clique_img is not None:
+                    # unpack tuple
+                    clique_idx, img_snippet = clique_img
+
+                    # add padding to height of image snippet
+                    pad = (
+                        pad_h
+                        if (pad := (max_h - ambiguous_img.shape[0])) > pad_w
+                        else pad
+                    )
+                    img_snippet = pad_array(
+                        img_snippet,
+                        pad_width = ((0, pad), (0, 0)),
+                        mode = "constant",
+                        constant_values = 0
+                    )
+
+                    # build an image strip
+                    img_strip, img_iter, clique_img, meta_strip =\
+                        build_image_strip(
+                            img = img_snippet,
+                            clique = clique_idx,
+                            clique_image_iter = img_iter,
+                            pad_h = pad_h,
+                            pad_w = pad_w,
+                            max_w = max_w,
+                            pad_fill_value = 0
+                        )
+                    
+                    # check whether to append a strip to the current image
+                    if (ambiguous_img.shape[0] + img_strip.shape[0]) > max_h:
+                        # pad the rest of the image and save out
+                        pad = max_h - ambiguous_img.shape[0]
+                        ambiguous_img = pad_array(
+                            ambiguous_img,
+                            pad_width = ((0, pad), (0, 0)),
+                            mode = "wrap"
+                        )
+                        ambiguous_img = (-ambiguous_img + 1) * 255
+                        ambiguous_img =\
+                            image_fromarray(ambiguous_img, mode = "L")
+                        
+                        logger.debug("Save ambiguous prediction snippets")
+                        ambiguous_img.save(ambiguous_img_out.joinpath(fn))
+                        # set new strip as the ambiguous image
+                        ambiguous_img = img_strip.copy()
+                        idx += 1
+                        fn = f"{tiff_fp.stem}-ambiguous-{idx}.png"
+                        meta = {fn: {**meta_strip}}
+                        meta[fn]["row_pos"] = [0] * len(meta["col_pos"])
+                    else:
+                        # update metadata
+                        meta[fn]["shapes"].extend(meta_strip["shapes"])
+                        meta[fn]["cliques"].extend(meta_strip["cliques"])
+                        meta[fn]["col_pos"].extend(meta_strip["col_pos"])
+                        # update metadata row positions
+                        meta[fn]["row_pos"].extend(
+                            [ambiguous_img.shape[0]]
+                            * len(meta_strip["col_pos"])
+                        )
+                        # concatenate the image strip
+                        ambiguous_img =\
+                            concat_array([ambiguous_img, img_strip], axis = 0)
+
+                # save final ambiguous image set out
+                pad = max_h - ambiguous_img.shape[0]
+                ambiguous_img = pad_array(
+                    ambiguous_img,
+                    pad_width = ((0, pad), (0, 0)),
+                    mode = "wrap"
+                )
+                ambiguous_img = (-ambiguous_img + 1) * 255
+                ambiguous_img =\
+                    image_fromarray(ambiguous_img, mode = "L")
+                ambiguous_img.save(ambiguous_img_out.joinpath(fn))
+
+                logger.debug("Save ambiguous images metadata out")
+                fn = ambiguous_img_out\
+                    .joinpath(f"{tiff_fp.stem}-ambiguous-meta.json")
+                with open(fn, "w") as f:
+                    dump_json(meta, f)
+                # logger.debug("Save ambiguous prediction snippets")
+                # for clique_idx, img in enumerate(outputs[2]["image"]):
+                #     ambiguous_img.save(ambiguous_img_out.joinpath(
+                #         f"{tiff_fp.stem}-clique-{clique_idx}.png"
+                #     ))
                 logger.debug("Save ambiguous predictions geodata out")
                 outputs[2]["word_groups"].to_file(cliques_out_dir.joinpath(
                     f"{tiff_fp.stem}-cliques.gpkg"
