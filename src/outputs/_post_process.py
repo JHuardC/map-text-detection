@@ -346,26 +346,26 @@ class ProcessToponymExtractorPredictions:
             # create georeferencing control points for image
             undetermined["control_points"].append({
                 "clique_idx": tup.clique_idx,
-                "pixel_x": tup.min_col,
-                "pixel_y": tup.min_row,
+                "pixel_x": 0,
+                "pixel_y": 0,
                 "geometry": Point(tup.minx, tup.maxy)
             })
             undetermined["control_points"].append({
                 "clique_idx": tup.clique_idx,
-                "pixel_x": tup.min_col,
-                "pixel_y": tup.max_row,
+                "pixel_x": 0,
+                "pixel_y": temp.shape[0] - 1,
                 "geometry": Point(tup.minx, tup.miny)
             })
             undetermined["control_points"].append({
                 "clique_idx": tup.clique_idx,
-                "pixel_x": tup.max_col,
-                "pixel_y": tup.min_row,
+                "pixel_x": temp.shape[1] - 1,
+                "pixel_y": 0,
                 "geometry": Point(tup.maxx, tup.maxy)
             })
             undetermined["control_points"].append({
                 "clique_idx": tup.clique_idx,
-                "pixel_x": tup.max_col,
-                "pixel_y": tup.max_row,
+                "pixel_x": temp.shape[1] - 1,
+                "pixel_y": temp.shape[0] - 1,
                 "geometry": Point(tup.maxx, tup.miny)
             })
 
