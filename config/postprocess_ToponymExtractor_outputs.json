@@ -1,5 +1,7 @@
 {
     "img_h": 2000,
     "img_w": 2000,
+    "pad_h": 50,
+    "pad_w": 50,
     "relative_path": "LOCAL_DIR"
 }
