@@ -440,7 +440,7 @@ if __name__ == "__main__":
             processed_preds = concat(processed_preds, ignore_index = True)
             # save processed predictions out
             processed_preds.to_file(save_preds_dir.joinpath(
-                img_meta["tiff_stem"] + "-ambiguous.gpkg"
+                img_meta["tiff_stem"] + ".gpkg"
             ))
 
     except Exception as e:
