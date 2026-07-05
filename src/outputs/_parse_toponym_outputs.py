@@ -9,11 +9,12 @@ https://github.com/SesamePaste233/ToponymExtractor/tree/main
 from typing import Final
 from logging import getLogger
 import progressbar
-from numpy import array, clip
+from numpy import array, clip, ndarray
 from geopandas import GeoDataFrame
 from pandas import DataFrame
 from edina import get_transformer_from_geodataframe
 from shapely import Polygon
+from rasterio.transform import GCPTransformer
 
 progressbar.streams.flush()
 
@@ -27,6 +28,32 @@ _WIDGETS: Final[list] = [
     ' ', progressbar.Timer(), ' | ',
      progressbar.ETA(), '|'
 ]
+
+def georeference_geometries(
+    transformer: GCPTransformer, coords: ndarray
+) -> ndarray:
+    """
+    Convert pixel coordinates to a geometric coordinate using the
+    transformer.
+
+    Parameters
+    ----------
+    transformer: GCPTransformer.
+        Required. Transformer using georeferenced control points to
+        convert pixel coordinates to geo coordinates. Can provide any
+        object with an .xy() method.
+    
+    coords: numpy array.
+        Required. 2d-array of shape [N, 2]. Column 0 representing x
+        coords and column 1 representing y coords.
+
+    Returns
+    -------
+    Numpy array of shape [N, 2].
+        Converted coordinate values.
+    """
+    return array([*zip(*transformer.xy(coords[:,1], coords[:,0]))])
+
 
 def _convert_ToponymExtractor_outputs_to_gdf_without_geotransforms(
     out: list[dict[str, str | list[list[dict[str, str | list[list[float]]]]]]],
