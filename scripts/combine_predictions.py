@@ -1,0 +1,258 @@
+"""
+Combines polygon mask predictions for multiple sources.
+"""
+# Imports
+from typing import Final
+from pathlib import Path
+from dotenv import find_dotenv, load_dotenv
+from os import environ
+import progressbar
+
+progressbar.streams.flush()
+progressbar.streams.wrap_stderr()
+
+# Constants and presets
+PROJECT_DIR: Final[Path]
+PROJECT_DIR = Path(find_dotenv(".env", 1, 1)).absolute().parent
+environ["PROJECT_DIR"] = str(PROJECT_DIR)
+load_dotenv(PROJECT_DIR.joinpath(".env"))
+
+FILENAME: Final[str] = Path(__file__).stem
+_CONFIG_DIR: Final[Path]
+_CONFIG_DIR = PROJECT_DIR.joinpath(f"config/{FILENAME}.json")
+_PRESET: Final = dict(relative_path = "PROJECT_DIR")
+
+_WIDGETS: Final[list] = [
+    ' [', progressbar.widgets.Counter(format='%(value)d of %(max_value)d'),
+    ' (', progressbar.widgets.Percentage(), ')] ',
+    progressbar.widgets.GranularBar(),
+    ' ', progressbar.Timer(), ' | ',
+     progressbar.ETA(), '|'
+]
+
+# Funtions
+def parse_path(path: str, relative_to_envar: str | None = None) -> Path:
+    """
+    Utility function used to derive a path variable in conjunction with
+    paths stored as environment variables.
+
+    Parameters
+    ----------
+    path: str.
+        Required. Path string.
+
+    ralative_to_envar: str or None. Default: None.
+        Optional. Environment variable to use as the root that the
+        `path` argument is considered relative to. If no argument is
+        passed, then no environment variable will be called.
+    
+    Return
+    ------
+    Path.
+    """
+    # Convert path argument to a Path instance
+    path: Path = Path(path)
+    if path.is_absolute() or (relative_to_envar is None):
+        # Directly return absolute path
+        return path
+    # Get relative to path component
+    try:
+        root = environ[relative_to_envar]
+    except KeyError as _:
+        msg =\
+            "relative_to_envar argument not recognised as an environment "\
+            f"variable. Argument passed: {relative_to_envar}."
+        raise ValueError(msg) from None
+    return Path(root).joinpath(path)
+
+if __name__ == "__main__":
+    # Imports
+    from argparse import ArgumentParser, RawDescriptionHelpFormatter
+    from logging import getLogger, StreamHandler, FileHandler, Formatter
+    from datetime import datetime
+    from json import load as load_json
+    from pandas import concat, merge as merge_dataframes
+    from geopandas import read_file
+
+    parser = ArgumentParser(
+        description = __doc__, formatter_class = RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "save_dir",
+        action = "store",
+        type = str,
+        metavar = "to/save/dir",
+        help =\
+            "Required. Specify directory to save GeoDataFrames out to. The "\
+            "GeoDataFrames are saved under filenames corresponding to the "\
+            "TIFF filenames the text instances belong within. Can provide a "\
+            "relative or absolute path; relative paths will be set "\
+            "relative to the path variable specified in config."
+    )
+    parser.add_argument(
+        "mask_dirs",
+        action = "store",
+        nargs = "+",
+        type = str,
+        metavar = "to/prediction/gpkg/dirs",
+        help =\
+            "Required. Paths to directories containing ambiguous prediction"\
+            "mask directories. Can provide relative or absolute "\
+            "paths; relative paths will be set against path variable "\
+            "specified in config."
+    )
+    parser.add_argument(
+        "-c", "--config",
+        action = "store",
+        type = str,
+        dest = "config",
+        metavar = "path/to/config/json",
+        default = None,
+        help =\
+            "Optional. Specify path to config json, containing presets used "\
+            "to split tiffs into pngs. Can provide either a relative or "\
+            "absolute path; relative paths will be set relative to the "\
+            "project root directory. If no argument is provided, will "\
+            f"attempt to load config from 'config/{FILENAME}.json', " \
+            "relative to project root folder."
+    )
+    parser.add_argument(
+        "-s", "--stream-level",
+        action = "store",
+        choices = [10, 20, 30, 40, 50],
+        default = 20,
+        dest = "stream_level",
+        help = \
+            "Optional. Level for logging messages to be streamed out. "\
+            "Default is 20 - info level and above."
+    )
+    parser.add_argument(
+        "-f", "--file-logs",
+        action = "store_true",
+        dest = "file",
+        help = \
+            "Optional. Save logging messages to .log file. If flagged, logs "\
+            f"will be saved out to 'logs/{FILENAME}_YYYYmmDDHHMMSS.log' "\
+            "relative to project root folder. All logging messages will be "\
+            "saved (from debug up)."
+    )
+    cla_args = parser.parse_args()
+
+    logger = getLogger()
+    logger.setLevel(10)
+    # Format
+    fmt = Formatter(
+        "[%(asctime)s] - %(levelname)s - %(filename)s - Line %(lineno)d - "\
+        "%(funcName)s: %(message)s"
+    )
+    # Stream to terminal
+    f = StreamHandler()
+    f.setLevel(cla_args.stream_level)
+    f.setFormatter(fmt)
+    logger.addHandler(f)
+    # Optionally log to file
+    if cla_args.file:
+        f = PROJECT_DIR.joinpath(
+            f"logs/{FILENAME}_{datetime.now().strftime("%Y%m%d%H%M%S")}.log"
+        )
+        f = FileHandler(f, mode = "w")
+        f.setLevel(10)
+        f.setFormatter(fmt)
+        logger.addHandler(f)
+    
+    try:
+        # Try reading config
+        f = (
+            _CONFIG_DIR
+            if cla_args.config is None
+            else parse_path(cla_args.config, "PROJECT_DIR")
+        )
+        with open(f, "r") as f:
+            config = {**_PRESET, **load_json(f)}
+    
+        logger.debug("Parsing read in and save out file paths")
+        save_dir = parse_path(cla_args.save_dir, config["relative_path"])
+        if not save_dir.exists():
+            raise ValueError(
+                f"Command line argument for the combined polygon masks to be "\
+                f"saved out to does not lead to an existing path. Argument "\
+                f"passed: {cla_args.save_dir}"
+            )
+        if save_dir.is_file():
+            raise ValueError(
+                f"Command line argument for the combined polygon masks to be "\
+                f"saved out to leads to a file, rather than a directory. "\
+                f"Value passed in command line: {cla_args.save_dir}"
+            )
+        mask_dirs = [
+            parse_path(el, config["relative_path"])
+            for el in cla_args.mask_dirs
+        ]
+        if not all(p.exists() for p in mask_dirs):
+            raise ValueError(
+                f"At least on command line argument for the polygon mask "\
+                f"directories does not lead to an existing directory. "\
+                f"Instance passed: "\
+                f"{next((p for p in mask_dirs if not p.exists()))}"
+            )
+        if any(p.is_file() for p in mask_dirs):
+            raise ValueError(
+                f"At least on command line argument for the polygon mask "\
+                f"directories leads to a file, rather than a directory. "\
+                f"Instance passed: "\
+                f"{next((p for p in mask_dirs if p.is_file()))}"
+            )
+        
+        logger.debug("Getting polygon mask filepaths")
+        mask_filepaths = list(
+            set(i for j in mask_dirs for i in j.glob("*.gpkg"))
+        )
+        logger.debug("Group prediction polygon files by file name")
+        temp = sorted(set(fp.name for fp in mask_filepaths))
+        mask_filepaths = [
+            sorted(
+                [fp for fp in mask_filepaths if fp.name == fn],
+                key = lambda d: mask_dirs.index(d.parent)
+            )
+            for fn in temp
+        ]
+
+        logger.debug("Iterate through prediction masks for each file group")
+        mask_filepaths_iter = progressbar.progressbar(
+            mask_filepaths,
+            widgets = _WIDGETS,
+            prefix = "Combining groups of mask predictions:"
+        )
+        mask_groups_fp: list[Path]
+        for mask_groups_fp in mask_filepaths_iter:
+            # load predictions
+            mask_preds = [read_file(mask_fp) for mask_fp in mask_groups_fp]
+            # concatenate predictions
+            mask_preds = concat(
+                [gdf[config["base_columns"]] for gdf in mask_preds],
+                ignore_index = True
+            )
+
+            # Normalize groupid
+            mask_preds["key"] =\
+                mask_preds.png_filename + mask_preds.groupid.astype("string")
+
+            key_group = mask_preds[["key"]]\
+                .drop_duplicates(ignore_index = True)
+            key_group["groupid"] = [*range(len(key_group))]
+            
+            mask_preds = merge_dataframes(
+                mask_preds[[c for c in mask_preds.columns if c != "groupid"]],
+                key_group,
+                on = "key"
+            )
+
+            # Select columns
+            mask_preds = mask_preds[config["base_columns"]]
+            
+            # save processed predictions out
+            mask_preds.to_file(save_dir.joinpath(mask_groups_fp[0].name))
+
+    except Exception as e:
+        logger.error(e, exc_info = True)
+        raise

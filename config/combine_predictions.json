@@ -1,0 +1,6 @@
+{
+    "base_columns": [
+        "png_filename", "groupid", "wordid", "word", "score", "geometry"
+    ],
+    "relative_path": "LOCAL_DIR"
+}
