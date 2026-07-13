@@ -32,17 +32,15 @@ _WIDGETS: Final[list] = [
 
 if __name__ == "__main__":
     # Imports
-    from argparse import ArgumentParser, RawDescriptionHelpFormatter
     from logging import getLogger, StreamHandler, FileHandler, Formatter
     from datetime import datetime
     from json import load as load_json
     from pandas import concat, merge as merge_dataframes
     from geopandas import read_file
     from project_utils import parse_path
+    from project_utils import parse_path, build_argument_parser
 
-    parser = ArgumentParser(
-        description = __doc__, formatter_class = RawDescriptionHelpFormatter
-    )
+    parser = build_argument_parser(filename = FILENAME, docstr = __doc__)
     parser.add_argument(
         "save_dir",
         action = "store",
@@ -66,41 +64,6 @@ if __name__ == "__main__":
             "mask directories. Can provide relative or absolute "\
             "paths; relative paths will be set against path variable "\
             "specified in config."
-    )
-    parser.add_argument(
-        "-c", "--config",
-        action = "store",
-        type = str,
-        dest = "config",
-        metavar = "path/to/config/json",
-        default = None,
-        help =\
-            "Optional. Specify path to config json, containing presets used "\
-            "to split tiffs into pngs. Can provide either a relative or "\
-            "absolute path; relative paths will be set relative to the "\
-            "project root directory. If no argument is provided, will "\
-            f"attempt to load config from 'config/{FILENAME}.json', " \
-            "relative to project root folder."
-    )
-    parser.add_argument(
-        "-s", "--stream-level",
-        action = "store",
-        choices = [10, 20, 30, 40, 50],
-        default = 20,
-        dest = "stream_level",
-        help = \
-            "Optional. Level for logging messages to be streamed out. "\
-            "Default is 20 - info level and above."
-    )
-    parser.add_argument(
-        "-f", "--file-logs",
-        action = "store_true",
-        dest = "file",
-        help = \
-            "Optional. Save logging messages to .log file. If flagged, logs "\
-            f"will be saved out to 'logs/{FILENAME}_YYYYmmDDHHMMSS.log' "\
-            "relative to project root folder. All logging messages will be "\
-            "saved (from debug up)."
     )
     cla_args = parser.parse_args()
 
