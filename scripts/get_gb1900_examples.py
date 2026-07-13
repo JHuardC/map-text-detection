@@ -159,7 +159,7 @@ if __name__ == "__main__":
         "meta_dir",
         action = "store",
         type = str,
-        metavar = "path/to/meta.ext",
+        metavar = "path/to/gcp.ext",
         help =\
             "Required. Path to metadata file containing the control points "\
             "used for georeferencing the PNGs found in the PNG directory "\
@@ -187,8 +187,8 @@ if __name__ == "__main__":
         help =\
             "Optional. Specify directory to save the relevant Gb1900 points "\
             "out to. The output is a GeoDataFrame of points. The format of "\
-            "the saved output will be determined the extension of the "\
-            "filename passed. Can provide a relative or absolute path; "\
+            "the saved output will be determined by the extension passed in "\
+            "the filename. Can provide a relative or absolute path; "\
             "relative paths will be set against the path variable specified "\
             "in the config. If no argument is provided the data will be "\
             "saved as a geopckage -- text-locations.gpkg -- in the same "\
@@ -203,11 +203,11 @@ if __name__ == "__main__":
         default = None,
         help =\
             "Optional. Specify path to config json, containing presets used "\
-            "to split tiffs into pngs. Can provide either a relative or "\
-            "absolute path; relative paths will be set relative to the "\
-            "project root directory. If no argument is provided, will "\
-            f"attempt to load config from 'config/{FILENAME}.json', " \
-            "relative to project root folder."
+            "by this script. Can provide either a relative or absolute path; "\
+            "relative paths will be set relative to the project root "\
+            "directory. If no argument is provided, will attempt to load a "\
+            f"config from 'config/{FILENAME}.json', relative to the project "\
+            f"root folder."
     )
     parser.add_argument(
         "-s", "--stream-level",

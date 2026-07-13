@@ -1,8 +1,10 @@
 """
-Script to parse the outputs from the ToponymExtractor model. Converts
-the outputs to geodata polygons. Polygon masks are grouped by the TIFF
-files the texts are contained within and groups are saved out to
-seperate files, with filenames corresponding to the tiff_filenames.
+Script to parse the outputs from the ToponymExtractor model.
+
+Converts the outputs to geodata polygons. Polygon masks are grouped by
+the TIFF files the texts are contained within and these groups are
+saved out to seperate geopackage (.gpkg) files, with filenames
+corresponding to the TIFF file names.
 
 ToponymExtractor sourced from:
 https://github.com/SesamePaste233/ToponymExtractor/tree/main
@@ -67,7 +69,7 @@ def parse_path(path: str, relative_to_envar: str | None = None) -> Path:
 
 def read_pickle_queue(path: Path) -> list[dict]:
     """
-    Reads specifiv pickle file format containing ToponymExtractor
+    Reads specific pickle file format containing ToponymExtractor
     predictions.
     """
     outputs = []
@@ -99,20 +101,20 @@ if __name__ == "__main__":
         "predictions",
         action = "store",
         type = str,
-        metavar = "path/to/predictions/pickle",
+        metavar = "to/preds/pickle",
         help =\
             "Required. Path to pickle file containing ToponymExtractor "\
-            "outputs. Can provide relative or absolute paths; relative paths "\
-            "will be set against path variable specified in config."
+            "predictions. Can provide relative or absolute paths; relative "\
+            "paths will be set against path variable specified in config."
     )
     parser.add_argument(
         "gcps",
         action = "store",
         type = str,
-        metavar = "path/to/gcp/gpkg",
+        metavar = "to/gcp/ext",
         help =\
-            "Required. Path to geopackage (.gpkg) file containing the "\
-            "control points used for georeferencing the images passed to the "\
+            "Required. Path to geodata file containing the control points "\
+            "used for georeferencing the images passed to the "\
             "ToponymExtractor model. Dataset must include fields: "\
             "\"tiff_filename\", \"png_filename\", \"pixel_x\", \"pixel_y\", "\
             "and \"geometry\". Can provide relative or absolute paths; "\
@@ -123,19 +125,20 @@ if __name__ == "__main__":
         "save_geo_to",
         action = "store",
         type = str,
-        metavar = "path/to/save/dir",
+        metavar = "to/save/dir",
         help =\
             "Required. Specify directory to save converted GeoDataFrames out "\
-            "to. The GeoDataFrames are saved under filenames corresponding "\
-            "to the TIFF filenames the text instances belong within. Can "\
-            "provide a relative or absolute path; relative paths will be set "\
-            "relative to the path variable specified in config."
+            "to. The GeoDataFrames are saved as geopackages (.gpkg) under "\
+            "file names corresponding to the TIFF filenames the text " \
+            "instances belong within. Can provide a relative or absolute "\
+            "path; relative paths will be set relative to the path variable "\
+            "specified in config."
     )
     parser.add_argument(
         "save_err_to",
         action = "store",
         type = str,
-        metavar = "path/to/save/error/csv",
+        metavar = "to/save/errors/csv",
         help =\
             "Required. Specify CSV file path to save error information out "\
             "to. Can provide a relative or absolute path; relative paths "\
@@ -150,11 +153,11 @@ if __name__ == "__main__":
         default = None,
         help =\
             "Optional. Specify path to config json, containing presets used "\
-            "to split tiffs into pngs. Can provide either a relative or "\
-            "absolute path; relative paths will be set relative to the "\
-            "project root directory. If no argument is provided, will "\
-            f"attempt to load config from 'config/{FILENAME}.json', " \
-            "relative to project root folder."
+            "by this script. Can provide either a relative or absolute path; "\
+            "relative paths will be set relative to the project root "\
+            "directory. If no argument is provided, will attempt to load a "\
+            f"config from 'config/{FILENAME}.json', relative to the project "\
+            f"root folder."
     )
     parser.add_argument(
         "-s", "--stream-level",

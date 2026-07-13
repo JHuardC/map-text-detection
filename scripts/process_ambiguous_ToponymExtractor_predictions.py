@@ -2,6 +2,11 @@
 Script to process the ambiguous predictions from the ToponymExtractor
 model.
 
+Converts the outputs to geodata polygons. Polygon masks are grouped by
+the TIFF files the texts are contained within and these groups are
+saved out to seperate geopackage (.gpkg) files, with filenames
+corresponding to the TIFF file names.
+
 ToponymExtractor sourced from:
 https://github.com/SesamePaste233/ToponymExtractor/tree/main
 """
@@ -124,11 +129,12 @@ if __name__ == "__main__":
         "preds",
         action = "store",
         type = str,
-        metavar = "to/predictions/pickle",
+        metavar = "to/preds/pickle",
         help =\
-            "Required. Path to pickle file containing ToponymExtractor "\
-            "outputs. Can provide relative or absolute paths; relative paths "\
-            "will be set against path variable specified in config."
+            "Required. Path to pickle file containing predictions from "\
+            "ToponymExtractor for the ambiguous images. Can provide relative "\
+            "or absolute paths; relative paths will be set against path "\
+            "variable specified in config."
     )
     parser.add_argument(
         "gcps",
@@ -148,7 +154,7 @@ if __name__ == "__main__":
         "save_geopreds_to",
         action = "store",
         type = str,
-        metavar = "path/to/save/preds/dir",
+        metavar = "to/save/preds/dir",
         help =\
             "Required. Specify directory to save converted prediction "\
             "GeoDataFrames out to. The GeoDataFrames are saved under the "\
@@ -162,7 +168,7 @@ if __name__ == "__main__":
         "save_err_to",
         action = "store",
         type = str,
-        metavar = "path/to/save/error/csv",
+        metavar = "to/save/error/csv",
         help =\
             "Required. Specify CSV file path to save errored prediction "\
             "information out to. Can provide a relative or absolute path; "\
@@ -178,11 +184,11 @@ if __name__ == "__main__":
         default = None,
         help =\
             "Optional. Specify path to config json, containing presets used "\
-            "to split tiffs into pngs. Can provide either a relative or "\
-            "absolute path; relative paths will be set relative to the "\
-            "project root directory. If no argument is provided, will "\
-            f"attempt to load config from 'config/{FILENAME}.json', " \
-            "relative to project root folder."
+            "by this script. Can provide either a relative or absolute path; "\
+            "relative paths will be set relative to the project root "\
+            "directory. If no argument is provided, will attempt to load a "\
+            f"config from 'config/{FILENAME}.json', relative to the project "\
+            f"root folder."
     )
     parser.add_argument(
         "-s", "--stream-level",
