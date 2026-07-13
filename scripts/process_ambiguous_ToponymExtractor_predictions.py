@@ -75,24 +75,6 @@ def parse_path(path: str, relative_to_envar: str | None = None) -> Path:
         raise ValueError(msg) from None
     return Path(root).joinpath(path)
 
-
-def read_pickle_FIFO_queue(path: Path) -> list[dict]:
-    """
-    Reads specific pickle FIFO format containing ToponymExtractor
-    predictions.
-    """
-    outputs = []
-    with open(path, "rb") as f:
-        try:
-            while 1:
-                outputs.append(load_pickle(f))
-        except EOFError as _:
-            # all outputs have been read, context will automatically close
-            pass
-        except Exception as e:
-            raise
-    return outputs
-
 if __name__ == "__main__":
     # Imports
     from argparse import ArgumentParser, RawDescriptionHelpFormatter
@@ -104,7 +86,9 @@ if __name__ == "__main__":
     from shapely import box
     from geopandas import read_file, GeoDataFrame, sjoin as spatial_join
     from outputs import\
-        convert_ToponymExtractor_outputs_to_gdf, georeference_geometries
+        read_pickle_queue,\
+        convert_ToponymExtractor_outputs_to_gdf,\
+        georeference_geometries
     from edina import get_transformer_from_geodataframe
 
     parser = ArgumentParser(
@@ -314,7 +298,7 @@ if __name__ == "__main__":
         logger.debug("Loading georefencing control points file")
         gcp = read_file(gcp_fp)
         logger.debug("Loading ambiguous predictions files")
-        predictions = read_pickle_FIFO_queue(pred_fp)
+        predictions = read_pickle_queue(pred_fp)
         
         logger.debug("Convert predictions to geodata format")
         predictions, errors = convert_ToponymExtractor_outputs_to_gdf(

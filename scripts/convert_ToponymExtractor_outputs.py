@@ -67,24 +67,6 @@ def parse_path(path: str, relative_to_envar: str | None = None) -> Path:
     return Path(root).joinpath(path)
 
 
-def read_pickle_queue(path: Path) -> list[dict]:
-    """
-    Reads specific pickle file format containing ToponymExtractor
-    predictions.
-    """
-    outputs = []
-    with open(path, "rb") as f:
-        try:
-            while 1:
-                outputs.append(load_pickle(f))
-        except EOFError as _:
-            # all outputs have been read, context will automatically close
-            pass
-        except Exception as e:
-            raise
-    return outputs
-
-
 if __name__ == "__main__":
     # Imports
     from argparse import ArgumentParser, RawDescriptionHelpFormatter
@@ -92,7 +74,8 @@ if __name__ == "__main__":
     from datetime import datetime
     from json import load as load_json
     from geopandas import read_file
-    from outputs import convert_ToponymExtractor_outputs_to_gdf
+    from outputs import\
+        convert_ToponymExtractor_outputs_to_gdf, read_pickle_queue
 
     parser = ArgumentParser(
         description = __doc__, formatter_class = RawDescriptionHelpFormatter
