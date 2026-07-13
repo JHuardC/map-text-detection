@@ -35,14 +35,12 @@ _PRESET: Final = dict(relative_path = "PROJECT_DIR")
 
 if __name__ == "__main__":
     # Imports
-    from logging import getLogger, StreamHandler, FileHandler, Formatter
-    from datetime import datetime
     from json import load as load_json
     from geopandas import read_file
     from outputs import\
         convert_ToponymExtractor_outputs_to_gdf, read_pickle_queue
     from project_utils import parse_path
-    from project_utils import parse_path, build_argument_parser
+    from project_utils import parse_path, build_argument_parser, build_logger
 
     parser = build_argument_parser(filename = FILENAME, docstr = __doc__)
     parser.add_argument(
@@ -94,27 +92,11 @@ if __name__ == "__main__":
     )
     cla_args = parser.parse_args()
 
-    logger = getLogger()
-    logger.setLevel(10)
-    # Format
-    fmt = Formatter(
-        "[%(asctime)s] - %(levelname)s - %(filename)s - Line %(lineno)d - "\
-        "%(funcName)s: %(message)s"
+    logger = build_logger(
+        stream_level = cla_args.stream_level,
+        write_to = PROJECT_DIR.joinpath("logs") if cla_args.file else None,
+        filename = FILENAME
     )
-    # Stream to terminal
-    f = StreamHandler()
-    f.setLevel(cla_args.stream_level)
-    f.setFormatter(fmt)
-    logger.addHandler(f)
-    # Optionally log to file
-    if cla_args.file:
-        f = PROJECT_DIR.joinpath(
-            f"logs/{FILENAME}_{datetime.now().strftime("%Y%m%d%H%M%S")}.log"
-        )
-        f = FileHandler(f, mode = "w")
-        f.setLevel(10)
-        f.setFormatter(fmt)
-        logger.addHandler(f)
     
     try:
         # Try reading config
