@@ -7,7 +7,9 @@ https://github.com/SesamePaste233/ToponymExtractor/tree/main
 """
 # Imports
 from typing import Final
+from pathlib import Path
 from logging import getLogger
+from pickle import load as load_pickle
 import progressbar
 from numpy import array, clip, ndarray
 from geopandas import GeoDataFrame
@@ -28,6 +30,31 @@ _WIDGETS: Final[list] = [
     ' ', progressbar.Timer(), ' | ',
      progressbar.ETA(), '|'
 ]
+
+
+def read_pickle_queue(path: Path) -> list[dict]:
+    """
+    Reads specific pickle file format containing ToponymExtractor
+    predictions.
+
+    ToponymExtractor predictions were saved as a FIFO queue of
+    dictionaries in pickle (.pkl) format.
+    """
+    outputs = []
+    f =  open(path, "rb")
+    try:
+        while 1:
+            outputs.append(load_pickle(f))
+    except EOFError as _:
+        # all outputs have been read.
+        pass
+    except Exception as e:
+        # raise any other error
+        raise
+    finally:
+        f.close()
+    return outputs
+
 
 def georeference_geometries(
     transformer: GCPTransformer, coords: ndarray
