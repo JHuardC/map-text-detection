@@ -22,23 +22,6 @@ _CONFIG_DIR: Final[Path]
 _CONFIG_DIR = PROJECT_DIR.joinpath(f"config/{FILENAME}.json")
 _PRESET: Final = dict(relative_path = "PROJECT_DIR")
 
-# Funtions
-def parse_path(path: str, relative_to_envar: str) -> Path:
-    # Convert path argument to a Path instance
-    path: Path = Path(path)
-    if path.is_absolute():
-        # Directly return absolute path
-        return path
-    # Get relative to path component
-    try:
-        root = environ[relative_to_envar]
-    except KeyError as _:
-        msg =\
-            "relative_to_envar argument not recognised as an environment "\
-            f"variable. Argument passed: {relative_to_envar}."
-        raise ValueError(msg) from None
-    return Path(root).joinpath(path)
-
 if __name__ == "__main__":
     # Imports
     from argparse import ArgumentParser, RawDescriptionHelpFormatter
@@ -46,6 +29,7 @@ if __name__ == "__main__":
     from datetime import datetime
     from json import load as load_json
     from edina import EDINATiffPNGConverter
+    from project_utils import parse_path
 
     parser = ArgumentParser(
         description = __doc__, formatter_class = RawDescriptionHelpFormatter
