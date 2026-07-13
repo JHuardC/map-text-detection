@@ -2,10 +2,19 @@
 Boilerplate code for script building
 """
 # Imports
+from typing import Final
+from logging import Logger, getLogger, StreamHandler, FileHandler, Formatter
+from datetime import datetime
 from pathlib import Path
 from os import environ
 from dotenv import load_dotenv
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
+
+# Constants
+_DEFAULT_LOGGING_FORMAT : Final[Formatter] = Formatter(
+        "[%(asctime)s] - %(levelname)s - %(filename)s - Line %(lineno)d - "\
+        "%(funcName)s: %(message)s"
+    )
 
 # Functions
 def get_envars(root_name: str, root: Path, fn: str = ".env") -> None:
@@ -133,3 +142,68 @@ def build_argument_parser(filename: str, docstr: str) -> ArgumentParser:
             "saved (from debug up)."
     )
     return parser
+
+def build_logger(
+    stream_level: int, write_to: Path | None, filename: str
+) -> Logger:
+    """
+    Builds root logger with project presets used by scripts.
+
+    Parameters
+    ----------
+    stream_level: int {`10`, `20`, `30`, `40`, `50`}.
+        Required. Message level threshold for logging record to be
+        printed out to `sys.stderr`.
+        - `10`: `DEBUG` or higher
+        - `20`: `INFO` or higher
+        - `30`: `WARNING` or higher
+        - `40`: `ERROR` or higher
+        - `50`: `CRITICAL`.
+
+    write_to: Path or None.
+        Required. Path to directory to save logging messages to. If a
+        directory is provided, logging will be saved under filename
+        structure '{`filename`}__YYYYmmDDHHMMSS.log', where `filename`
+        refers to the filename parameter and 'YYYYmmDDHHMMSS' provides
+        a timestamp for when the script was ran.
+        
+    filename: str.
+        Required. Name of the script the function is being called from.
+
+    Returns
+    -------
+    Logger.
+    """
+    if (stream_level > 50) or (stream_level < 10):
+        raise ValueError(
+            "stream_level argument must be between 10 and 50 (inclusive). "\
+            f"Argument passed: {stream_level}"
+        )
+    if isinstance(write_to, Path) and write_to.is_file():
+        raise ValueError(
+            "write_to argument is a file, rather than a directory. Argument "\
+            f"passed: {write_to}"
+        )
+    if isinstance(write_to, Path) and (not write_to.exists()):
+        raise ValueError(
+            "write_to argument does not lead to an existing destination. "\
+            f"Argument passed: {write_to}"
+        )
+
+    logger = getLogger()
+    logger.setLevel(10)
+
+    # Stream to terminal handler
+    f = StreamHandler()
+    f.setLevel(stream_level)
+    f.setFormatter(_DEFAULT_LOGGING_FORMAT)
+    logger.addHandler(f)
+    # Optionally log to file hangler
+    if write_to is not None:
+        f = f"{filename}_{datetime.now().strftime("%Y%m%d%H%M%S")}.log"
+        f = FileHandler(f, mode = "w")
+        f.setLevel(10)
+        f.setFormatter(_DEFAULT_LOGGING_FORMAT)
+        logger.addHandler(f)
+    
+    return logger
