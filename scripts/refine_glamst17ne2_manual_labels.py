@@ -4,6 +4,15 @@ copy of the TIFF image the labels were derived from is also saved out.
 
 Code is locked to specific input: glamst17ne2-manually-labelled.gpkg
 as there is only one manually labelled file in the project.
+
+Script outputs:
+
+- glam-st17ne-2.tiff: Cropped tiff file from which predictions were
+derived, cropped to exclude the area where predictions were not verified
+
+- glamst17ne2-manually-labelled.gpkg: Refined manually labelled
+predictions. This file excludes unverified predictions, suppresses
+overlapping predictions, and removes false instances of word detections.
 """
 # Imports
 from typing import Final
