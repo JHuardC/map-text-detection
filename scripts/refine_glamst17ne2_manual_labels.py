@@ -139,6 +139,19 @@ if __name__ == "__main__":
 
         logger.debug("Remove predictions that mistake map features for text")
         gdf = gdf[gdf.status != "DNE"]
+
+        logger.debug("Fill png_filename NAs with empty strings")
+        gdf["png_filename"] = gdf["png_filename"].fillna("")
+        
+        logger.debug(
+            "Fix png_filename errors ('NULL' in filename / 'png' suffix "\
+            "missing)"
+        )
+        gdf["png_filename"] = gdf.png_filename.str.replace("NULL", "")
+        selection = (
+            (~gdf.png_filename.str.endswith("png")) & (gdf.png_filename != "")
+        )
+        gdf.loc[selection, "png_filename"] += "png"
         
         logger.debug("Save verified predictions out")
         gdf.to_file(out_fp.joinpath("glamst17ne2-manually-labelled.gpkg"))
