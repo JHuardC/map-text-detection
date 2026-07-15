@@ -72,7 +72,8 @@ if __name__ == "__main__":
         gdf = gdf[gdf.verified]
 
         logger.debug("Normalise unverified geometry types to Polygon type")
-        unverified_gdf["geometry"] = unverified_gdf.geometry.buffer(0)
+        unverified_gdf["geometry"] =\
+            unverified_gdf.geometry.buffer(0).convex_hull
 
         logger.debug("Convert unverified records CRS to tif raster CRS")
         unverified_gdf = unverified_gdf.to_crs(tiff_crs)
@@ -121,6 +122,14 @@ if __name__ == "__main__":
         })
         with open_raster(out_tiff_fp, "w", **out_meta) as dest:
             dest.write(out_tiff[0], 1)
+
+        logger.debug("Remove overlapping predictions")
+        gdf = gdf[
+            (~gdf.status.str.contains("O")) | gdf.status.str.contains("N")
+        ]
+
+        logger.debug("Remove predictions that mistake map features for text")
+        gdf = gdf[gdf.status != "DNE"]
         
         logger.debug("Save verified predictions out")
         gdf.to_file(out_fp.joinpath("glamst17ne2-manually-labelled.gpkg"))
