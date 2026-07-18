@@ -1,6 +1,8 @@
 """
-Script to process the outputs from the ToponymExtractor model. Cleans
-overlapping predictions that come from PNG overlaps.
+Script to post-process the extracted polygons from the ToponymExtractor
+model predictions.
+
+Cleans overlapping predictions that come from PNG overlaps.
 
 ToponymExtractor sourced from:
 https://github.com/SesamePaste233/ToponymExtractor/tree/main
@@ -35,41 +37,6 @@ _WIDGETS: Final[list] = [
     ' ', progressbar.Timer(), ' | ',
      progressbar.ETA(), '|'
 ]
-
-# Funtions
-def parse_path(path: str, relative_to_envar: str | None = None) -> Path:
-    """
-    Utility function used to derive a path variable in conjunction with
-    paths stored as environment variables.
-
-    Parameters
-    ----------
-    path: str.
-        Required. Path string.
-
-    ralative_to_envar: str or None. Default: None.
-        Optional. Environment variable to use as the root that the
-        `path` argument is considered relative to. If no argument is
-        passed, then no environment variable will be called.
-    
-    Return
-    ------
-    Path.
-    """
-    # Convert path argument to a Path instance
-    path: Path = Path(path)
-    if path.is_absolute() or (relative_to_envar is None):
-        # Directly return absolute path
-        return path
-    # Get relative to path component
-    try:
-        root = environ[relative_to_envar]
-    except KeyError as _:
-        msg =\
-            "relative_to_envar argument not recognised as an environment "\
-            f"variable. Argument passed: {relative_to_envar}."
-        raise ValueError(msg) from None
-    return Path(root).joinpath(path)
 
 
 def build_image_strip(
@@ -209,18 +176,15 @@ def build_image_strip(
 
 if __name__ == "__main__":
     # Imports
-    from argparse import ArgumentParser, RawDescriptionHelpFormatter
-    from logging import getLogger, StreamHandler, FileHandler, Formatter
-    from datetime import datetime
     from json import load as load_json, dump as dump_json
     from pandas import concat
     from geopandas import read_file, GeoDataFrame
     from outputs import ProcessToponymExtractorPredictions
     from PIL.Image import fromarray as image_fromarray
+    from project_utils import parse_path
+    from project_utils import parse_path, build_argument_parser, build_logger
 
-    parser = ArgumentParser(
-        description = __doc__, formatter_class = RawDescriptionHelpFormatter
-    )
+    parser = build_argument_parser(filename = FILENAME, docstr = __doc__)
     parser.add_argument(
         "tiff_dir",
         action = "store",
@@ -286,25 +250,28 @@ if __name__ == "__main__":
             "specified in config."
     )
     parser.add_argument(
-        "save_ambiguous_img_to",
+        "save_ambiguous_to",
         action = "store",
         type = str,
-        metavar = "to/ambiguous/img/dir",
+        metavar = "to/ambiguous/dir",
         help =\
             "Required. Specify directory to save ambiguous predictions' "\
             "images and their asscoiated metadata out to. The images are "\
-            "saved under the filename format "\
+            "saved under the filename format: "\
             "\"{tiff filename}-ambiguous-{index}.png\"; where "\
             "{tiff filename} represents the corresponding TIFF filename the "\
-            "image segment is sourced from, and {index} represents a the "\
-            "unique index for each ambiguous image generated. The associated "\
-            "metadata file is saved under the filename "\
-            "\"{tiff filename}-ambiguous-meta.json\" Can provide a relative "\
+            "image segment is sourced from, and {index} represents a unique "\
+            "index for each ambiguous image generated. The associated image"\
+            "metadata file is saved under the filename format:"\
+            "\"{tiff filename}-ambiguous-meta.json\". The file containing "\
+            "the associated polygon masks for the ambiguous images are saved "\
+            " as geopackage (.gpkg) files under the filename format: "\
+            "\"{tiff filename}-cliques.gpkg\". Can provide a relative "\
             "or absolute path; relative paths will be set relative to the "\
             "path variable specified in config."
     )
     parser.add_argument(
-        "-g", "--gcp",
+        "-a", "--agcp",
         action = "store",
         type = str,
         metavar = "to/save/gcp.ext",
@@ -321,82 +288,13 @@ if __name__ == "__main__":
             "will be saved as a geopckage -- control-points.gpkg -- in the "\
             "same directory the ambiguous image snippets were saved out to."
     )
-    parser.add_argument(
-        "-m", "--clique-meta",
-        action = "store",
-        type = str,
-        metavar = "to/save/cliques/dir",
-        default = None,
-        dest = "clique_dir",
-        help =\
-            "Optional. Specify the directory to save the ambiguous "\
-            "predictions' geodata out to. The GeoDataFrames are saved under "\
-            "the filename format \"{tiff filename}-cliques.gpkg\"; where "\
-            "{tiff filename} represents the corresponding TIFF filename the "\
-            "ambiguous predictions are sourced from. Can provide a relative "\
-            "or absolute path; relative paths will be set against the path "\
-            "variable specified in the config. If no argument is provided "\
-            "the metadata will be will be saved to the same directory that "\
-            "the ambiguous images were saved out to."
-    )
-    parser.add_argument(
-        "-c", "--config",
-        action = "store",
-        type = str,
-        dest = "config",
-        metavar = "path/to/config/json",
-        default = None,
-        help =\
-            "Optional. Specify path to config json, containing presets used "\
-            "to split tiffs into pngs. Can provide either a relative or "\
-            "absolute path; relative paths will be set relative to the "\
-            "project root directory. If no argument is provided, will "\
-            f"attempt to load config from 'config/{FILENAME}.json', " \
-            "relative to project root folder."
-    )
-    parser.add_argument(
-        "-s", "--stream-level",
-        action = "store",
-        choices = [10, 20, 30, 40, 50],
-        default = 20,
-        dest = "stream_level",
-        help = \
-            "Optional. Level for logging messages to be streamed out. "\
-            "Default is 20 - info level and above."
-    )
-    parser.add_argument(
-        "-f", "--file-logs",
-        action = "store_true",
-        dest = "file",
-        help = \
-            "Optional. Save logging messages to .log file. If flagged, logs "\
-            f"will be saved out to 'logs/{FILENAME}_YYYYmmDDHHMMSS.log' "\
-            "relative to project root folder. All logging messages will be "\
-            "saved (from debug up)."
-    )
     cla_args = parser.parse_args()
 
-    logger = getLogger()
-    logger.setLevel(10)
-    # Format
-    fmt = Formatter(
-        "[%(asctime)s] - %(levelname)s - %(filename)s - Line %(lineno)d - "\
-        "%(funcName)s: %(message)s"
+    logger = build_logger(
+        stream_level = cla_args.stream_level,
+        write_to = PROJECT_DIR.joinpath("logs") if cla_args.file else None,
+        filename = FILENAME
     )
-    # Stream to terminal
-    f = StreamHandler()
-    f.setLevel(cla_args.stream_level)
-    f.setFormatter(fmt)
-    logger.addHandler(f)
-    # Optionally log to file
-    if cla_args.file:
-        f = PROJECT_DIR.joinpath(
-            f"logs/{FILENAME}_{datetime.now().strftime("%Y%m%d%H%M%S")}.log"
-        )
-        f = FileHandler(f, mode = "w")
-        f.setLevel(10)
-        f.setFormatter(fmt)
-        logger.addHandler(f)
     
     try:
         # Try reading config
@@ -477,45 +375,27 @@ if __name__ == "__main__":
                 f"directory. Value passed in command line: "\
                 f"{cla_args.save_suppressed_to}"
             )
-        ambiguous_img_out =\
-            parse_path(cla_args.save_ambiguous_img_to, config["relative_path"])
-        if not ambiguous_img_out.exists():
+        ambiguous_out =\
+            parse_path(cla_args.save_ambiguous_to, config["relative_path"])
+        if not ambiguous_out.exists():
             raise ValueError(
                 f"Command line argument for the directory to save the image "\
                 f"snippets for ambiguous predictions out to does not lead to "\
                 f"an existing path. Argument passed: "\
                 f"{cla_args.save_ambiguous_img_to}"
             )
-        if ambiguous_img_out.is_file():
+        if ambiguous_out.is_file():
             raise ValueError(
                 f"Command line argument for the path to save the image "\
                 f"snippets for ambiguous predictions out to leads to a file, "\
                 f"rather than a directory. Value passed in command line: "\
                 f"{cla_args.save_ambiguous_img_to}"
             )
-        gcp_out_fp = (
+        ambiguous_gcp_out_fp = (
             parse_path(cla_args.ctrl_out, config["relative_path"])
             if cla_args.ctrl_out is not None
-            else ambiguous_img_out.joinpath("control-points.gpkg")
+            else ambiguous_out.joinpath("control-points.gpkg")
         )
-        cliques_out_dir = (
-            parse_path(cla_args.clique_dir, config["relative_path"])
-            if cla_args.clique_dir is not None
-            else ambiguous_img_out
-        )
-        if not cliques_out_dir.exists():
-            raise ValueError(
-                f"Command line argument for the directory to save the "\
-                f"ambiguous predictions out to does not lead to an existing "\
-                f"path. Argument passed: {cla_args.clique_dir}"
-            )
-        if cliques_out_dir.is_file():
-            raise ValueError(
-                f"Command line argument for the path to save the ambiguous "\
-                f"predictions out to leads to a file, rather than a "\
-                f"directory. Value passed in command line: "\
-                f"{cla_args.clique_dir}"
-            )
         
         logger.debug("Loading georefencing control points file")
         control_points = read_file(gcp_fp)
@@ -674,7 +554,7 @@ if __name__ == "__main__":
                             image_fromarray(ambiguous_img, mode = "L")
                         
                         logger.debug("Save ambiguous prediction snippets")
-                        ambiguous_img.save(ambiguous_img_out.joinpath(fn))
+                        ambiguous_img.save(ambiguous_out.joinpath(fn))
                         # set new strip as the ambiguous image
                         ambiguous_img = img_strip.copy()
                         idx += 1
@@ -705,10 +585,10 @@ if __name__ == "__main__":
                 ambiguous_img = (-ambiguous_img + 1) * 255
                 ambiguous_img =\
                     image_fromarray(ambiguous_img, mode = "L")
-                ambiguous_img.save(ambiguous_img_out.joinpath(fn))
+                ambiguous_img.save(ambiguous_out.joinpath(fn))
 
                 logger.debug("Save ambiguous images metadata out")
-                fn = ambiguous_img_out\
+                fn = ambiguous_out\
                     .joinpath(f"{tiff_fp.stem}-ambiguous-meta.json")
                 with open(fn, "w") as f:
                     dump_json(meta, f)
@@ -718,7 +598,7 @@ if __name__ == "__main__":
                 #         f"{tiff_fp.stem}-clique-{clique_idx}.png"
                 #     ))
                 logger.debug("Save ambiguous predictions geodata out")
-                outputs[2]["word_groups"].to_file(cliques_out_dir.joinpath(
+                outputs[2]["word_groups"].to_file(ambiguous_out.joinpath(
                     f"{tiff_fp.stem}-cliques.gpkg"
                 ))
                 logger.debug("Add control points")
@@ -729,7 +609,7 @@ if __name__ == "__main__":
         
         if len(ambiguous_img_control_points):
             logger.debug("Save ambiguous image control points out")
-            ambiguous_img_control_points.to_file(gcp_out_fp)
+            ambiguous_img_control_points.to_file(ambiguous_gcp_out_fp)
 
     except Exception as e:
         logger.error(e, exc_info = True)

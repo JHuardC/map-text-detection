@@ -30,53 +30,15 @@ _WIDGETS: Final[list] = [
      progressbar.ETA(), '|'
 ]
 
-# Funtions
-def parse_path(path: str, relative_to_envar: str | None = None) -> Path:
-    """
-    Utility function used to derive a path variable in conjunction with
-    paths stored as environment variables.
-
-    Parameters
-    ----------
-    path: str.
-        Required. Path string.
-
-    ralative_to_envar: str or None. Default: None.
-        Optional. Environment variable to use as the root that the
-        `path` argument is considered relative to. If no argument is
-        passed, then no environment variable will be called.
-    
-    Return
-    ------
-    Path.
-    """
-    # Convert path argument to a Path instance
-    path: Path = Path(path)
-    if path.is_absolute() or (relative_to_envar is None):
-        # Directly return absolute path
-        return path
-    # Get relative to path component
-    try:
-        root = environ[relative_to_envar]
-    except KeyError as _:
-        msg =\
-            "relative_to_envar argument not recognised as an environment "\
-            f"variable. Argument passed: {relative_to_envar}."
-        raise ValueError(msg) from None
-    return Path(root).joinpath(path)
-
 if __name__ == "__main__":
     # Imports
-    from argparse import ArgumentParser, RawDescriptionHelpFormatter
-    from logging import getLogger, StreamHandler, FileHandler, Formatter
-    from datetime import datetime
     from json import load as load_json
     from pandas import concat, merge as merge_dataframes
     from geopandas import read_file
+    from project_utils import parse_path
+    from project_utils import parse_path, build_argument_parser, build_logger
 
-    parser = ArgumentParser(
-        description = __doc__, formatter_class = RawDescriptionHelpFormatter
-    )
+    parser = build_argument_parser(filename = FILENAME, docstr = __doc__)
     parser.add_argument(
         "save_dir",
         action = "store",
@@ -101,64 +63,13 @@ if __name__ == "__main__":
             "paths; relative paths will be set against path variable "\
             "specified in config."
     )
-    parser.add_argument(
-        "-c", "--config",
-        action = "store",
-        type = str,
-        dest = "config",
-        metavar = "path/to/config/json",
-        default = None,
-        help =\
-            "Optional. Specify path to config json, containing presets used "\
-            "to split tiffs into pngs. Can provide either a relative or "\
-            "absolute path; relative paths will be set relative to the "\
-            "project root directory. If no argument is provided, will "\
-            f"attempt to load config from 'config/{FILENAME}.json', " \
-            "relative to project root folder."
-    )
-    parser.add_argument(
-        "-s", "--stream-level",
-        action = "store",
-        choices = [10, 20, 30, 40, 50],
-        default = 20,
-        dest = "stream_level",
-        help = \
-            "Optional. Level for logging messages to be streamed out. "\
-            "Default is 20 - info level and above."
-    )
-    parser.add_argument(
-        "-f", "--file-logs",
-        action = "store_true",
-        dest = "file",
-        help = \
-            "Optional. Save logging messages to .log file. If flagged, logs "\
-            f"will be saved out to 'logs/{FILENAME}_YYYYmmDDHHMMSS.log' "\
-            "relative to project root folder. All logging messages will be "\
-            "saved (from debug up)."
-    )
     cla_args = parser.parse_args()
 
-    logger = getLogger()
-    logger.setLevel(10)
-    # Format
-    fmt = Formatter(
-        "[%(asctime)s] - %(levelname)s - %(filename)s - Line %(lineno)d - "\
-        "%(funcName)s: %(message)s"
+    logger = build_logger(
+        stream_level = cla_args.stream_level,
+        write_to = PROJECT_DIR.joinpath("logs") if cla_args.file else None,
+        filename = FILENAME
     )
-    # Stream to terminal
-    f = StreamHandler()
-    f.setLevel(cla_args.stream_level)
-    f.setFormatter(fmt)
-    logger.addHandler(f)
-    # Optionally log to file
-    if cla_args.file:
-        f = PROJECT_DIR.joinpath(
-            f"logs/{FILENAME}_{datetime.now().strftime("%Y%m%d%H%M%S")}.log"
-        )
-        f = FileHandler(f, mode = "w")
-        f.setLevel(10)
-        f.setFormatter(fmt)
-        logger.addHandler(f)
     
     try:
         # Try reading config

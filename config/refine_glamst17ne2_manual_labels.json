@@ -1,0 +1,6 @@
+{
+    "relative_path": "LOCAL_DIR",
+    "relative_path_to_labels": "outputs/manual-labelling/raw/glamst17ne2-manually-labelled.gpkg",
+    "relative_path_to_tiff": "data/tiffs/glam-st17ne-2.tif",
+    "relative_path_save_to": "outputs/manual-labelling/processed"
+}
