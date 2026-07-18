@@ -6,5 +6,6 @@ from ._parse_toponym_outputs import (
 from ._post_process import (
     get_intersecting_polygon_pairs,
     get_intersecting_png_masks,
-    ProcessToponymExtractorPredictions
+    ProcessToponymExtractorPredictions,
+    ProcessToponymExtractorPredictionsV2
 )

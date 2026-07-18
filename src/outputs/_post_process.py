@@ -9,13 +9,13 @@ from numpy import ndarray, hstack, floor as np_floor, ceil as np_ceil
 from rasterio import open as open_raster
 from rasterio.transform import AffineTransformer
 from pandas import concat, Series
-from geopandas import GeoDataFrame, sjoin
+from geopandas import GeoDataFrame, GeoSeries, sjoin
 from edina import get_png_overlaps
 
 # Functions
 def _get_intersecting_png_masks(
     gdf1: GeoDataFrame, gdf2: GeoDataFrame
-) -> GeoDataFrame:
+) -> tuple[GeoDataFrame, GeoSeries]:
     """
     Get intersecting masks from the predictions for different PNGs.
 
@@ -23,18 +23,32 @@ def _get_intersecting_png_masks(
     ----------
     gdf1, gdf2: GeoDataFrame, GeoDataFrame.
         Required. Contains the text predictions with polygons for their
-        masks. Each GeoDataFrame must include the field: "png_filename".
+        masks. Each GeoDataFrame must include the field: "png_filename",
+        and "groupid".
     
     Returns
     -------
-    GeoDataFrame. Each record represents a pair of predictions from
-    different PNGs whose masks intersect. The returned geometry field
-    contains the gdf1 geometry. Includes the fields:
+    tuple: (GeoDataFrame, GeoSeries).
+    
+    GeoDataFrame:
+    
+    Each record represents a pair of predictions from different PNGs
+    whose masks intersect. The returned geometry field contains the gdf1
+    geometry. Includes the fields:
 
     - png_filename_left, png_filename_right: str, str. These are the
     filenames for the images the intersecting polygons were derived
     from.
+    - groupid_left, groupid_right: int, int. These are the group indices
+    for each png representing the toponym the word instance was assigned
+    to.
     - iou: float. Intersection over union between the polygon pairs.
+
+    Geoseries:
+
+    Each record is aligned to the records in the returned GeoDataFrame
+    and contains the intersecting area between `gdf1` and `gdf2`
+    joint geometries.
     """
     overlapping = sjoin(gdf1, gdf2, how = "inner", predicate = "intersects")
     # Do not include overlapping predictions from the same png - leveraging
@@ -53,7 +67,41 @@ def _get_intersecting_png_masks(
     
     overlapping["iou"] = intersection_area / union_area
 
-    return overlapping
+    return overlapping, intersection_area
+
+
+def _check_intersecting_png_masks_gdfs(
+    gdf1: GeoDataFrame, gdf2: GeoDataFrame
+) -> None:
+    """
+    Checks `gdf1` and `gdf2` contain "png_filename" and "groupid"
+    columns.
+
+    Returns
+    -------
+    None.
+
+    Raises
+    ------
+    ValueErrors if desired column names do not exist.
+    """
+    if "png_filename" not in gdf1.columns:
+        raise ValueError(
+            "The 'png_filename' field is missing from gdf1 GeoDataFrame"
+        )
+    if "png_filename" not in gdf2.columns:
+        raise ValueError(
+            "The 'png_filename' field is missing from gdf2 GeoDataFrame"
+        )
+    if "groupid" not in gdf1.columns:
+        raise ValueError(
+            "The 'groupid' field is missing from gdf1 GeoDataFrame"
+        )
+    if "groupid" not in gdf2.columns:
+        raise ValueError(
+            "The 'groupid' field is missing from gdf2 GeoDataFrame"
+        )
+    return None
 
 
 def get_intersecting_png_masks(
@@ -79,15 +127,9 @@ def get_intersecting_png_masks(
     from.
     - iou: float. Intersection over union between the polygon pairs.
     """
-    if "png_filename" not in gdf1.columns:
-        raise ValueError(
-            "The 'png_filename' field is missing from gdf1 GeoDataFrame"
-        )
-    if "png_filename" not in gdf2.columns:
-        raise ValueError(
-            "The 'png_filename' field is missing from gdf2 GeoDataFrame"
-        )
-    return _get_intersecting_png_masks(gdf1 = gdf1, gdf2 = gdf2)
+    _check_intersecting_png_masks_gdfs(gdf1 = gdf1, gdf2 = gdf2)
+    output, _ = _get_intersecting_png_masks(gdf1 = gdf1, gdf2 = gdf2)
+    return output
 
 
 def get_intersecting_polygon_pairs(predictions: GeoDataFrame) -> GeoDataFrame:
@@ -149,9 +191,51 @@ def get_intersecting_polygon_pairs(predictions: GeoDataFrame) -> GeoDataFrame:
     return overlapping
 
 
-class ProcessToponymExtractorPredictions:
+class ToponymExtractorProcessor:
+
+    @property
+    def current_tiff_overlap(self) -> Polygon:
+        """
+        Polygon representing the geographic areas overlapped by PNGs
+        for a specific TIFF file.
+        """
+        try:
+            return self._current_tiff_overlap
+        except AttributeError as _:
+            msg = "Attribute current_tiff_overlap has not been assigned yet. "\
+                "Attribute current_tiff_overlap is assigned when "\
+                "process_predictions() is called."
+            raise AttributeError(msg) from None
+        except Exception as e:
+            raise
+    @current_tiff_overlap.setter
+    def current_tiff_overlap(self, v) -> None:
+        msg = "Cannot directly set current_tiff_overlap attribute"
+        raise AttributeError(msg)
+    @current_tiff_overlap.deleter
+    def current_tiff_overlap(self) -> None:
+        msg = "Cannot directly delete current_tiff_overlap attribute"
+        raise AttributeError(msg)
+
+    @property
+    def buffer(self) -> int:
+        """
+        Number of pixels to buffer ambiguous images by.
+        """
+        return self._buffer
+    @buffer.setter
+    def buffer(self, v: int) -> None:
+        msg = "Cannot directly set buffer attribute; can only be set on "\
+            "initialisation."
+        raise AttributeError(msg)
+    @buffer.deleter
+    def buffer(self) -> None:
+        msg = "Cannot directly delete buffer attribute"
+        raise AttributeError(msg)
+
+
     def __init__(
-        self, ctrl_points: GeoDataFrame, tiff_dir: Path
+        self, ctrl_points: GeoDataFrame, tiff_dir: Path, buffer: int = 10
     ):
         """
         Post-process ToponymExtractor outputs
@@ -163,6 +247,8 @@ class ProcessToponymExtractorPredictions:
             each image passed to the ToponymExtractor model.
         tiff_dir: Path.
             Required. Directory path to the Edina downloaded tiff files.
+        buffer: int. Default: 10.
+            Optional. Number of pixels to buffer ambiguous images by.
         """
         self._tiff_height: int
         self._tiff_width: int
@@ -185,6 +271,7 @@ class ProcessToponymExtractorPredictions:
                 f"Argument passed to tiff_dir is not a directory: {tiff_dir}"
             )
         self.tiff_directory: Path = tiff_dir
+        self._buffer = buffer
         # store standardized image sizes
         # self.img_h, self.img_w = img_h, img_w
 
@@ -199,41 +286,25 @@ class ProcessToponymExtractorPredictions:
             self._tiff_data = src.read() # binary array
 
 
-    def _add_png_overlap_column(self) -> None:
+    def _process_indeterminant_predictions(
+        self, gdf: GeoDataFrame, current_predictions: GeoDataFrame
+    ) -> GeoDataFrame:
         """
-        Determine the relationship between the predictions and the
-        overlapping spaces of the TIFF file.
+        Edits `current_predictions` GeoDataFrame,
+        `_suppressed_predictions` GeoDataFrame attribute, and the 
+        `_undetermined` dictionary attribute.
 
-        Adds column "png_overlap" to the current predictions
-        GeoDataFrame.
-        """
-        # default to all predictions belonging to a single png
-        self._current_predictions["png_overlap"] = "disjoint"
-
-        # update predictions that intersect with png overlap area
-        selection = self._current_predictions.geometry\
-            .intersects(self._current_tiff_overlap)
-        self._current_predictions.loc[selection, "png_overlap"] = "intersect"
-
-        # update predictions that are contained entirely within png overlap
-        # area
-        selection = self._current_predictions.geometry\
-            .within(self._current_tiff_overlap)
-        self._current_predictions.loc[selection, "png_overlap"] = "subset"
-
-
-    def _process_indeterminant_predictions(self, gdf: GeoDataFrame) -> None:
-        """
-        Edits _current_predictions GeoDataFrame attribute,
-        _suppressed_predictions GeoDataFrame attribute, and the 
-        _undetermined dictionary.
+        Returns
+        -------
+        `current_predictions` GeoDataFrame with suppressed indeterminate
+        predictions removed.
         """
         if len(gdf) == 0:
             # Nothing to process
-            return None
+            return current_predictions
         # Get all instances of overlapping predictions
         selection = gdf.index.union(gdf.index_right).unique().sort_values()
-        pred_words = self._current_predictions.loc[selection]
+        pred_words = current_predictions.loc[selection]
 
         # Retrieve the word groups the overlapping predictions belong to
         pred_words["key"] =\
@@ -289,8 +360,7 @@ class ProcessToponymExtractorPredictions:
                 .loc[bounds.key.isin(clique)]\
                 .geometry\
                 .union_all()\
-                .convex_hull\
-                .buffer(5)
+                .convex_hull
             
             grouped_polygons[-1]["words"] = word_groups\
                 .loc[word_groups.key.isin(clique)]\
@@ -313,18 +383,18 @@ class ProcessToponymExtractorPredictions:
         bboxes[["minx", "miny", "maxx", "maxy"]] =\
             grouped_polygons.geometry.to_crs(self._tiff_crs).bounds
 
-        # Convert coordinates to PNG row-column indices
+        # Convert coordinates to PNG row-column indices and include buffer
         temp = self._tiff_transformer\
             .rowcol(bboxes["minx"], bboxes["maxy"], op = np_floor)
         bboxes[["min_row", "min_col"]] =\
-            hstack([el.reshape((-1, 1)) for el in temp])
+            hstack([el.reshape((-1, 1)) for el in temp]) - self.buffer
         
         temp = self._tiff_transformer\
             .rowcol(bboxes["maxx"], bboxes["miny"], op = np_ceil)
         bboxes[["max_row", "max_col"]] =\
-            hstack([el.reshape((-1, 1)) for el in temp])
+            hstack([el.reshape((-1, 1)) for el in temp]) + self.buffer
         
-        # clip row-col index values to fall within the PNG dimensions
+        # clip row-col index values to fall within the TIFF dimensions
         bboxes[["min_row", "max_row"]] =\
             bboxes[["min_row", "max_row"]].clip(0, self._tiff_height - 1)
         bboxes[["min_col", "max_col"]] =\
@@ -389,52 +459,149 @@ class ProcessToponymExtractorPredictions:
         )
         # Update _current_predictions and _suppressed_predictions attributes
         selection =\
-            self._current_predictions.index.intersection(word_groups.index)
+            current_predictions.index.intersection(word_groups.index)
         self._suppressed_predictions = concat(
             [
                 self._suppressed_predictions,
-                self._current_predictions.loc[selection]
+                current_predictions.loc[selection]
             ],
             axis = 0
         )
-        self._current_predictions = self._current_predictions\
-            .loc[self._current_predictions.index.difference(word_groups.index)]
+        current_predictions = current_predictions\
+            .loc[current_predictions.index.difference(word_groups.index)]
+        
+        return current_predictions
+
+
+    def process_predictions(
+        self, tiff_fn: str, predictions: GeoDataFrame
+    ) -> GeoDataFrame:
+        # Get tiff image details
+        self._get_tiff_details(tiff_fn = tiff_fn)
+
+        # initialised suppressed predictions attribute
+        self._suppressed_predictions = GeoDataFrame()
+
+        # initialize undetermined predictions attribute
+        self._undetermined = {
+            "image": [],
+            "control_points": GeoDataFrame(),
+            "word_groups": GeoDataFrame()
+        }
+        # initialize clique count
+        self._clique_count = 0
+
+        self._current_tiff_overlap: Polygon = self.tif_overlaps\
+            .loc[self.tif_overlaps["tiff_filename"] == tiff_fn, "geometry"]\
+            .iloc[0]
+        
+        # Initialize current predictions log (retained predictions)
+        # Sort predictions by confidence score - descending
+        predictions: GeoDataFrame = predictions\
+            .sort_values("score", ascending = False, ignore_index = True)
+        # Keep a copy of all predictions to track word groups
+        self._all_predictions = predictions.copy()
+
+        return predictions
+
+
+class ProcessToponymExtractorPredictions(ToponymExtractorProcessor):
+    def __init__(self, ctrl_points, tiff_dir, buffer = 10):
+        """
+        Post-process ToponymExtractor outputs
+
+        Parameters
+        ----------
+        ctrl_points: GeoDataFrame.
+            Required. Contains the georeferencing control points for
+            each image passed to the ToponymExtractor model.
+        tiff_dir: Path.
+            Required. Directory path to the Edina downloaded tiff files.
+        buffer: int. Default: 10.
+            Optional. Number of pixels to buffer ambiguous images by.
+        """
+        super().__init__(ctrl_points, tiff_dir, buffer)
+
+
+    def _add_png_overlap_column(
+        self, current_predictions: GeoDataFrame
+    ) -> GeoDataFrame:
+        """
+        Determine the relationship between the predictions and the
+        overlapping spaces of the TIFF file.
+
+        Adds column "png_overlap" to the current predictions
+        GeoDataFrame.
+
+        Returns
+        -------
+        `current_predictions` GeoDataFrame with "png_overlap" column.
+        """
+        # default to all predictions belonging to a single png
+        current_predictions["png_overlap"] = "disjoint"
+
+        # update predictions that intersect with png overlap area
+        selection = current_predictions.geometry\
+            .intersects(self.current_tiff_overlap)
+        current_predictions.loc[selection, "png_overlap"] = "intersect"
+
+        # update predictions that are contained entirely within png overlap
+        # area
+        selection = current_predictions.geometry\
+            .within(self.current_tiff_overlap)
+        current_predictions.loc[selection, "png_overlap"] = "subset"
+
+        return current_predictions
         
 
     def _update_gdf_current_suppressed(
-        self, gdf: GeoDataFrame, selection: Series
-    ) -> GeoDataFrame:
+        self,
+        gdf: GeoDataFrame,
+        current_predictions: GeoDataFrame,
+        selection: Series
+    ) -> tuple[GeoDataFrame, GeoDataFrame]:
         """
         Edits overlapping predicitions GeoDataFrame `gdf`,
-        `_current_predictions` GeoDataFrame attribute, and
+        `current_predictions` GeoDataFrame, and
         `_suppressed_predictions` GeoDataFrame attribute.
+
+        Returns
+        -------
+        2-element tuple:
+        - `gdf` overlapping predictions GeoDataFrame,
+        - `current_predictions` GeoDataFrame
         """
         # Edit suppressed predictions GeoDataFrame with new predictions being
         # suppressed
         suppress_idxs = gdf.loc[selection, "index_right"].tolist()
         self._suppressed_predictions = concat(
             [
-                self._current_predictions.loc[suppress_idxs],
+                current_predictions.loc[suppress_idxs],
                 self._suppressed_predictions
             ],
             axis = 0
         )
         # Remove suppressed predictions from current predictions GeoDataFrame
-        self._current_predictions = self._current_predictions\
-            .loc[self._current_predictions.index.difference(suppress_idxs)]
+        current_predictions = current_predictions\
+            .loc[current_predictions.index.difference(suppress_idxs)]
         # Remove records of overlapping predictions for suppressed predictions
         gdf = gdf.loc[~gdf.index_right.isin(suppress_idxs)]
         gdf = gdf.loc[gdf.index.difference(suppress_idxs)]
-        return gdf
+        return gdf, current_predictions
 
 
     def _process_intersect_intersect_predictions(
-        self, gdf: GeoDataFrame
-    ) -> None:
+        self, gdf: GeoDataFrame, current_predictions: GeoDataFrame
+    ) -> GeoDataFrame:
         """
-        Edits `_current_predictions` GeoDataFrame attribute,
+        Edits `current_predictions` GeoDataFrame,
         `_suppressed_predictions` GeoDataFrame attribute and
         `_undetermined` dictionary.
+
+        Returns
+        -------
+        `current_predictions` GeoDataFrame with suppressed predictions
+        removed.
         """
         # Keep predctions with IoU scores less than or equal to .1
         gdf = gdf[gdf.iou > .1]
@@ -442,37 +609,64 @@ class ProcessToponymExtractorPredictions:
         # labels
         selection = ((gdf.iou >= .8) & (gdf.word_left == gdf.word_right))
         if selection.sum():
-            gdf = self._update_gdf_current_suppressed(
-                gdf = gdf, selection = selection
+            gdf, current_predictions = self._update_gdf_current_suppressed(
+                gdf = gdf,
+                current_predictions = current_predictions,
+                selection = selection
             )
 
         if len(gdf):
             # Get indeterminate predictions
-            self._process_indeterminant_predictions(gdf = gdf)
+            current_predictions = self._process_indeterminant_predictions(
+                gdf = gdf, current_predictions = current_predictions
+            )
+        
+        return current_predictions
         
 
-    def _process_subset_subset_predictions(self, gdf: GeoDataFrame) -> None:
+    def _process_subset_subset_predictions(
+        self, gdf: GeoDataFrame, current_predictions: GeoDataFrame
+    ) -> GeoDataFrame:
         """
-        Edits the `_current_predictions` GeoDataFrame attribute, and the
+        Edits the `current_predictions` GeoDataFrame, and the
         `_suppressed_predictions` GeoDataFrame attribute.
+
+        Returns
+        -------
+        `current_predictions` GeoDataFrame with suppressed predictions
+        removed.
         """
         # Apply non-maximal supression for IoU greater than .8
         selection = (gdf.iou >= .8)
         if selection.sum():
-            self._update_gdf_current_suppressed(gdf=gdf, selection=selection)
+            gdf, current_predictions = self._update_gdf_current_suppressed(
+                gdf = gdf,
+                current_predictions = current_predictions,
+                selection = selection
+            )
+        return current_predictions
         
 
-    def _process_intercept_subset_predictions(self, gdf: GeoDataFrame) -> None:
+    def _process_intercept_subset_predictions(
+        self, gdf: GeoDataFrame, current_predictions: GeoDataFrame
+    ) -> GeoDataFrame:
         """
-        Edits the `_current_predictions` GeoDataFrame attribute, the
+        Edits the `current_predictions` GeoDataFrame, the
         `_suppressed_predictions` GeoDataFrame attribute, and the
         `_undetermined` dictionary attribute.
+
+        Returns
+        -------
+        `current_predictions` GeoDataFrame with suppressed predictions
+        removed.
         """
         # Suppress "subset" predictions when words are the same
         selection = (gdf.word_left == gdf.word_right)
         if selection.sum():
-            gdf = self._update_gdf_current_suppressed(
-                gdf = gdf, selection = selection
+            gdf, current_predictions = self._update_gdf_current_suppressed(
+                gdf = gdf,
+                current_predictions = current_predictions,
+                selection = selection
             )
         # Keep predictions where IoU is less than .1
         gdf = gdf[(gdf.iou >= .1)]
@@ -486,25 +680,18 @@ class ProcessToponymExtractorPredictions:
         ]
         selection = Series(selection, index = gdf.index, dtype = "bool")
         if selection.sum():
-            gdf = self._update_gdf_current_suppressed(
-                gdf = gdf, selection = selection
+            gdf, current_predictions = self._update_gdf_current_suppressed(
+                gdf = gdf,
+                current_predictions = current_predictions,
+                selection = selection
             )
         if len(gdf):
             # Get indeterminate predictions
-            self._process_indeterminant_predictions(gdf = gdf)
-
-
-    # def _pad_image_snippets(self) -> None:
-    #     if (size := len(self._undetermined["image"])) == 0:
-    #         # Nothing to pad
-    #         return None
-    #     for idx in range(size):
-    #         img: Image = self._undetermined["image"].pop(idx)
-    #         padded_img = new_image(
-    #             mode = img.mode, size = (self.img_w, self.img_h), color = 255
-    #         )
-    #         padded_img.paste(im = img, box = (0, 0))
-    #         self._undetermined["image"].insert(idx, padded_img)
+            current_predictions = self._process_indeterminant_predictions(
+                gdf = gdf, current_predictions = current_predictions
+            )
+        
+        return current_predictions
 
 
     def process_predictions(
@@ -552,73 +739,193 @@ class ProcessToponymExtractorPredictions:
         were contained within the `predictions` GeoDataFrame, alongside
         the "clique_idx" field.
         """
-        # Get tiff image details
-        self._get_tiff_details(tiff_fn = tiff_fn)
-
-        # initialised suppressed predictions attribute
-        self._suppressed_predictions = GeoDataFrame()
-
-        # initialize undetermined predictions attribute
-        self._undetermined = {
-            "image": [],
-            "control_points": GeoDataFrame(),
-            "word_groups": GeoDataFrame()
-        }
-        # initialize clique count
-        self._clique_count = 0
-
-        self._current_tiff_overlap: Polygon = self.tif_overlaps\
-            .loc[self.tif_overlaps["tiff_filename"] == tiff_fn, "geometry"]\
-            .iloc[0]
+        # Initialize attributes
+        predictions = super()\
+            .process_predictions(tiff_fn = tiff_fn, predictions = predictions)
         
-        # Initialize current predictions log (retained predictions)
-        # Sort predictions by confidence score - descending
-        self._current_predictions: GeoDataFrame = predictions\
-            .sort_values("score", ascending = False, ignore_index = True)
-        # Keep a copy of all predictions to track word groups
-        self._all_predictions = self._current_predictions.copy()
-        self._add_png_overlap_column()
+        predictions = self._add_png_overlap_column(predictions)
 
         # Process intersect - intersect predictions
-        selection = (self._current_predictions["png_overlap"] == "intersect")
+        selection = (predictions["png_overlap"] == "intersect")
         intersect_intersect_predictions = get_intersecting_png_masks(
-            self._current_predictions[selection],
-            self._current_predictions[selection]
+            predictions[selection],
+            predictions[selection]
         )
         intersect_intersect_predictions = intersect_intersect_predictions[(
             intersect_intersect_predictions.index
             < intersect_intersect_predictions.index_right
         )]
-        self._process_intersect_intersect_predictions(
-            intersect_intersect_predictions
+        predictions = self._process_intersect_intersect_predictions(
+            intersect_intersect_predictions, predictions
         )
 
         # Process subset - subset predictions
-        selection = (self._current_predictions["png_overlap"] == "subset")
+        selection = (predictions["png_overlap"] == "subset")
         subset_subset_predictions = get_intersecting_png_masks(
-            self._current_predictions[selection],
-            self._current_predictions[selection]
+            predictions[selection],
+            predictions[selection]
         )
         subset_subset_predictions = subset_subset_predictions[(
             subset_subset_predictions.index
             < subset_subset_predictions.index_right
         )]
-        self._process_subset_subset_predictions(subset_subset_predictions)
+        predictions = self._process_subset_subset_predictions(
+            subset_subset_predictions, predictions
+        )
 
         # process intersect - subset predictions
         intersect_subset_predictions = get_intersecting_png_masks(
-            self._current_predictions, self._current_predictions
+            predictions, predictions
         )
         intersect_subset_predictions = intersect_subset_predictions[(
             (intersect_subset_predictions.png_overlap_left == "intersect")
             & (intersect_subset_predictions.png_overlap_right == "subset")
         )]
-        self._process_intercept_subset_predictions(
-            intersect_subset_predictions
+        predictions = self._process_intercept_subset_predictions(
+            intersect_subset_predictions, predictions
         )
         # self._pad_image_snippets()
         return (
-            self._current_predictions,
+            predictions,
+            self._suppressed_predictions,
+            self._undetermined
+        )
+
+
+class ProcessToponymExtractorPredictionsV2(ToponymExtractorProcessor):
+    def __init__(
+        self,
+        ctrl_points,
+        tiff_dir,
+        iou_threshold: float,
+        a_in_b_threshold: float,
+        buffer = 10
+    ):
+        """
+        Post-process ToponymExtractor outputs.
+
+        V2 streamlines the suppression process significantly.
+        Non-maximal suppression is not applied; instead, all
+        intersecting text instances whose intersection thresholds reach
+        the values specified are considered as ambiguous and passed on
+        to be predicted again.
+
+        Parameters
+        ----------
+        ctrl_points: GeoDataFrame.
+            Required. Contains the georeferencing control points for
+            each image passed to the ToponymExtractor model.
+        tiff_dir: Path.
+            Required. Directory path to the Edina downloaded tiff files.
+        iou_threshold: float.
+            Required. Intersection over union threshold value (range:
+            [0., 1.]), above which overlapping polygons will be
+            suppressed; interacts with `a_in_b_threshold` and in an OR
+            manner.
+        a_in_b_threshold: float.
+            Required. Given a pair of overlapping polygons, 'a in b'
+            represents the proportion that one polygon (polygon 'a')
+            intersects with the other (polygon 'b') (range: [0., 1.]).
+            `a_in_b_threshold` marks threshold value for 'a in b' above
+            which overlapping polygons will be suppressed; interacts
+            with `iou` in an OR manner.
+        buffer: int. Default: 10.
+            Optional. Number of pixels to buffer ambiguous images by.
+        """
+        super().__init__(ctrl_points, tiff_dir, buffer)
+    
+        if (iou_threshold > 1.) or (iou_threshold < 0.):
+            raise ValueError(
+                f"Argument passed to iou_threshold parameter must be between"\
+                f"0. and 1. (inclusive). Argument passed: {iou_threshold}"
+            )
+        self._iou_threshold: float = iou_threshold
+
+        if (a_in_b_threshold > 1.) or (a_in_b_threshold < 0.):
+            raise ValueError(
+                f"Argument passed to a_in_b_threshold parameter must be "\
+                f"between 0. and 1. (inclusive). Argument passed: "\
+                f"{a_in_b_threshold}"
+            )
+        self._a_in_b_threshold: float = a_in_b_threshold
+
+
+    def process_predictions(
+        self, tiff_fn: str, predictions: GeoDataFrame
+    ) -> tuple[
+        GeoDataFrame,
+        GeoDataFrame,
+        dict[str, list[ndarray] | GeoDataFrame]
+    ]:
+        """
+        Post-processes ToponymExtractor outputs. Suppresses overlapping
+        predictions from overlapping pngs.
+
+        Parameters
+        ----------
+        tiff_fn: str.
+            Required. Filename for the tiff file the predictions were
+            derived from, with the .tif extension.
+        predicitons: GeoDataFrame.
+            Required. GeoDataFrame containing the word predictions and
+            their associated polygon masks, derived from a specific tiff
+            file whose filename is passed to `tiff_fn`. Must include the
+            fields: "png_filename", "groupid", "word", "score", and
+            "geometry".
+        
+        Returns
+        -------
+        3-element tuple:
+
+        1. GeoDataFrame. Word predictions with their associated polygon
+        masks that were not suppressed.
+        2. GeoDataFrame. Suppressed word predictions with their
+        associated polygon masks.
+        3. Dictionary. Contains an undetermined collection of words and
+        their associated metadata required to be passed back to the
+        ToponymExtractor. Items include:
+        - "image": List of binary ndarrays. Array images containing the
+        map text segments that were undetermined. These images contain
+        the group text the undetermined words belonged to.
+        - "control_points": GeoDataFrame. Contains the georeferencing
+        control points for the image snippets. Contains the fields:
+        "clique_idx", "pixel_x", "pixel_y", and "geometry".
+        - "word_groups": GeoDataFrame. Contains the text instances
+        suppressed for each image snippet. Contains the same fields that
+        were contained within the `predictions` GeoDataFrame, alongside
+        the "clique_idx" field.
+        """
+        # Initialize attributes
+        predictions = super()\
+            .process_predictions(tiff_fn = tiff_fn, predictions = predictions)
+        
+        overlapping_predictions, intersect_area =\
+            _get_intersecting_png_masks(predictions, predictions)
+
+        overlapping_predictions["l_in_r_area_pc"] =\
+            intersect_area / overlapping_predictions.geometry.area
+        
+        overlapping_predictions["r_in_l_area_pc"] = self._all_predictions\
+            .loc[overlapping_predictions.index_right, "geometry"].area.array
+        overlapping_predictions["r_in_l_area_pc"] =\
+            intersect_area / overlapping_predictions.pop("r_in_l_area_pc")
+        
+        # select predictions for suppression by the thresholds passed on init
+        selection = (
+            (overlapping_predictions.iou >= self._iou_threshold)
+            |(overlapping_predictions.l_in_r_area_pc >= self._a_in_b_threshold)
+            |(overlapping_predictions.r_in_l_area_pc >= self._a_in_b_threshold)
+        )
+        overlapping_predictions = overlapping_predictions[selection]
+
+        # All retained predictions are classified as
+        # indeterminate/ambiguous, their image snippets are passed back
+        # to be re-predicted.
+        predictions = self._process_indeterminant_predictions(
+            gdf = overlapping_predictions, current_predictions = predictions
+        )
+        return (
+            predictions,
             self._suppressed_predictions,
             self._undetermined
         )
