@@ -3,7 +3,7 @@
     "img_w": 2000,
     "pad_h": 50,
     "pad_w": 50,
-    "pad_fill": 255,
+    "pad_fill": 0,
     "extractor_init_kwargs": {
         "iou_threshold": 0.2,
         "a_in_b_threshold": 0.5,
