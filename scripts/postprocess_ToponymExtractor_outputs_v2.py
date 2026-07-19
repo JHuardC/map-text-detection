@@ -560,7 +560,7 @@ if __name__ == "__main__":
                         ambiguous_img = img_strip.copy()
                         idx += 1
                         fn = f"{tiff_fp.stem}-ambiguous-{idx}.png"
-                        meta = {fn: {"tiff_stem": tiff_fp.stem, **meta_strip}}
+                        meta[fn] = {"tiff_stem": tiff_fp.stem, **meta_strip}
                         meta[fn]["row_pos"] = [0] * len(meta[fn]["col_pos"])
                     else:
                         # update metadata
