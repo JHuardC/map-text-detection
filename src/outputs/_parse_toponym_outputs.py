@@ -191,6 +191,7 @@ def _convert_ToponymExtractor_outputs_to_gdf_without_geotransforms(
 
     # Convert record lists to frames
     data, errors = GeoDataFrame(data), DataFrame(errors)
+    data["geometry"] = data.geometry.buffer(0).convex_hull
 
     # log parsing details
     pngs = data["png_filename"].nunique()
@@ -342,6 +343,7 @@ def _convert_ToponymExtractor_outputs_to_gdf_with_geotransforms(
 
     # Convert record lists to frames
     data = GeoDataFrame(data, crs = control_points.crs)
+    data["geometry"] = data.geometry.buffer(0).convex_hull
     errors = DataFrame(errors)
 
     # log parsing details
