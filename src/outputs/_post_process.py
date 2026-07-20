@@ -390,7 +390,7 @@ class ToponymExtractorProcessor:
             hstack([el.reshape((-1, 1)) for el in temp]) - self.buffer
         
         temp = self._tiff_transformer\
-            .rowcol(bboxes["maxx"], bboxes["miny"], op = np_ceil)
+            .rowcol(bboxes["maxx"], bboxes["miny"], op = np_floor)
         bboxes[["max_row", "max_col"]] =\
             hstack([el.reshape((-1, 1)) for el in temp]) + self.buffer
         
@@ -402,6 +402,14 @@ class ToponymExtractorProcessor:
         bboxes[["min_row", "min_col", "max_row", "max_col"]] =\
             bboxes[["min_row", "min_col", "max_row", "max_col"]]\
             .astype("int64")
+        
+        # Recalculate minx, miny, maxx, maxy to account for pixel buffer
+        temp = self._tiff_transformer.xy(bboxes["min_row"], bboxes["min_col"])
+        bboxes[["minx", "maxy"]] = hstack([el.reshape((-1, 1)) for el in temp])
+        
+        temp = self._tiff_transformer.xy(bboxes["max_row"], bboxes["max_col"])
+        bboxes[["maxx", "miny"]] = hstack([el.reshape((-1, 1)) for el in temp])
+
         
         # Get image and metadata for each image segment to be passed back
         # to the model
