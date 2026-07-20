@@ -1,6 +1,7 @@
 from ._parse_toponym_outputs import (
     convert_ToponymExtractor_outputs_to_gdf,
     georeference_geometries,
+    pixel_ref_geometries,
     read_pickle_queue
 )
 from ._post_process import (

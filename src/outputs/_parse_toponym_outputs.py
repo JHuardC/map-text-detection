@@ -16,7 +16,7 @@ from geopandas import GeoDataFrame
 from pandas import DataFrame
 from edina import get_transformer_from_geodataframe
 from shapely import Polygon
-from rasterio.transform import GCPTransformer
+from rasterio.transform import GCPTransformer, AffineTransformer
 
 progressbar.streams.flush()
 
@@ -57,7 +57,7 @@ def read_pickle_queue(path: Path) -> list[dict]:
 
 
 def georeference_geometries(
-    transformer: GCPTransformer, coords: ndarray
+    transformer: GCPTransformer | AffineTransformer, coords: ndarray
 ) -> ndarray:
     """
     Convert pixel coordinates to a geometric coordinate using the
@@ -65,7 +65,7 @@ def georeference_geometries(
 
     Parameters
     ----------
-    transformer: GCPTransformer.
+    transformer: GCPTransformer or AffineTransformer.
         Required. Transformer using georeferenced control points to
         convert pixel coordinates to geo coordinates. Can provide any
         object with an .xy() method.
@@ -80,6 +80,34 @@ def georeference_geometries(
         Converted coordinate values.
     """
     return array([*zip(*transformer.xy(coords[:,1], coords[:,0]))])
+
+
+def pixel_ref_geometries(
+    transformer: GCPTransformer | AffineTransformer, coords: ndarray
+) -> ndarray:
+    """
+    Convert georeferenced coordinates to a pixel coordinates using the
+    transformer.
+
+    Parameters
+    ----------
+    transformer: GCPTransformer or AffineTransformer.
+        Required. Transformer to convert georeference coordinates to
+        pixel coordinates. Can provide any object with a .rowcol()
+        method.
+    
+    coords: numpy array.
+        Required. 2d-array of shape [N, 2]. Column 0 representing x
+        coords and column 1 representing y coords.
+
+    Returns
+    -------
+    Numpy array of shape [N, 2].
+        Pixel coordinate values.
+    """
+    r, c = transformer.rowcol(coords[:, 0], coords[:, 1], op = None)
+    cr_arr = array([*zip(c, r)]).astype("float64")
+    return cr_arr
 
 
 def _convert_ToponymExtractor_outputs_to_gdf_without_geotransforms(
