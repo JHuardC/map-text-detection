@@ -1,5 +1,10 @@
 """
-Combines polygon mask predictions for multiple sources.
+Combines polygon mask predictions from multiple sources into single
+files.
+
+Reads in prediction files from different directories, and combines the
+predictions by shared filenames. The predictions are then saved out to a
+single file, sharing the same filename as the source files.
 """
 # Imports
 from typing import Final
