@@ -11,14 +11,20 @@ ToponymExtractor sourced from:
 https://github.com/SesamePaste233/ToponymExtractor/tree/main
 """
 # Imports
+from collections.abc import Generator
 from typing import Final
 from pathlib import Path
+from logging import getLogger
 from dotenv import find_dotenv, load_dotenv
 from os import environ
+from geopandas import GeoDataFrame
+from pandas import concat
 import progressbar
 
 progressbar.streams.flush()
 progressbar.streams.wrap_stderr()
+
+_logger = getLogger(__name__)
 
 # Constants and presets
 PROJECT_DIR: Final[Path]
@@ -38,6 +44,178 @@ _WIDGETS: Final[list] = [
     ' ', progressbar.Timer(), ' | ',
      progressbar.ETA(), '|'
 ]
+
+def extract_multibox_entities(
+    gdf: GeoDataFrame, entity_col: str, box_id_col: str
+) -> tuple[GeoDataFrame, GeoDataFrame]:
+    """
+    Extracts records of entities spread across multiple image snippet
+    boxes.
+
+    Parameters
+    ----------
+    gdf: GeoDataFrame.
+        Required. GeoDataFrame containing records to check.
+    
+    entity_col: str.
+        Required. Column name in `gdf` that contains the entity values
+        to check against.
+    
+    box_id_col: str.
+        Required. Column name in `gdf` that references the image snippet
+        box identities associated with each record. If more than one
+        box ID value is associated with an entity, then the records will
+        be extracted from `gdf`.
+    
+    Returns
+    -------
+    2-element tuple.
+        - GeoDataFrame: `gdf` GeoDataFrame with the records associated
+        with more than one image snippet box removed.
+        - GeoDataFrame: Containing the records associated with more than
+        one image snippet box.
+    """
+    # get boolean Series representing records whose entities are associated
+    # with more than one image snippet box
+    multibox_entities = gdf\
+        .groupby(by = entity_col, as_index = False)\
+        .agg(box_count = (box_id_col, "nunique"))
+    multibox_entities = multibox_entities[multibox_entities.box_count > 1]
+    multibox_entities = set(multibox_entities[entity_col])
+    multibox_entities = gdf[entity_col].isin(multibox_entities)
+
+    # extract multibox records
+    multibox = gdf[multibox_entities].copy()
+
+    # remove multibox records from gdf
+    gdf = gdf[~multibox_entities]
+
+    return gdf, multibox
+
+
+def update_supressed_gdf(
+    suppressed: GeoDataFrame, new_records: GeoDataFrame, reason: str
+) -> GeoDataFrame:
+    """
+    Updates GeoDataFrame logging suppressed records with `new_records`
+    and annotates with reason for suppression.
+
+    Parameters
+    ----------
+    suppressed: GeoDataFrame.
+        Required. Log of records suppressed.
+    
+    new_records: GeoDataFrame.
+        Required. Records to add to `suppressed`.
+    
+    reason: str.
+        Required. Reason `new_records` are being sppressed.
+    
+    Returns
+    -------
+    GeoDataFrame. Suppressed records with `new_records` added.
+    """
+    # add reason to new_records data
+    if len(new_records):
+        new_records["suppressed_reason"] = reason
+        suppressed = concat(
+            [new_records, suppressed], axis = 0, ignore_index = True
+        )
+    return suppressed
+
+
+def _get_minword_clique(group: GeoDataFrame) -> GeoDataFrame:
+    """
+    Gets words belonging to the same clique as the first word in group.
+
+    First word is determined by wordid and returned cliques include the
+    first word.
+
+    Parameters
+    ----------
+    group: GeoDataFrame.
+        Required. GeoDataFrame containing word predictions grouped into
+        a toponym by ToponymExtractor. Requires fields "wordid" and 
+        "clique_id".
+    
+    Returns
+    -------
+    GeoDataFrame. Contains the first word, by smallest "wordid", and all
+    other records that have the same "clique_id" as this record.
+    Contains same fields as `group`.
+    """
+    clique_id = group.at[group.wordid.idxmin(), "clique_id"]
+    group = group[(group.clique_id == clique_id)]
+    return group
+
+
+def _yield_group_minword_clique(
+    gdf: GeoDataFrame
+) -> Generator[GeoDataFrame, None, None]:
+    """
+    Yields words belonging to the same clique as the first word for each
+    group in the GeoDataFrame passed.
+
+    First word is determined by wordid and returned cliques include the
+    first word.
+
+    Parameters
+    ----------
+    gdf: GeoDataFrame.
+        Required. GeoDataFrame containing word predictions from one or
+        more toponym groups, output by ToponymExtractor. Requires fields
+        "wordid", "clique_id", and "pred_id".
+    
+    Yields
+    ------
+    GeoDataFrame. Contains the first word, by smallest "wordid", and all
+    other records that have the same "clique_id" as this record, for
+    each group in `gdf`. Contains same fields as `gdf`.
+    """
+    for groupid in gdf.groupid.unique():
+        yield _get_minword_clique(gdf[(gdf.groupid == groupid)].copy())
+
+
+def _get_minword_clique_groups(gdf: GeoDataFrame) -> GeoDataFrame:
+    """
+    Gets words belonging to the same clique as the first word for each
+    group in the GeoDataFrame passed.
+
+    First word is determined by wordid and returned cliques include the
+    first word.
+
+    Parameters
+    ----------
+    gdf: GeoDataFrame.
+        Required. GeoDataFrame containing word predictions from one or
+        more toponym groups, output by ToponymExtractor. Requires fields
+        "wordid", "clique_id", and "pred_id".
+    
+    Returns
+    -------
+    GeoDataFrame. Each group contains the same first word as the groups
+    in `gdf`, with the following words in the same group and within the
+    same clique.
+    """
+    return concat(
+        [*_yield_group_minword_clique(gdf)],
+        axis = 0,
+        ignore_index = True
+    )
+
+
+def _update_groupids(gdf: GeoDataFrame, start: int):
+    """
+    Reassigns groupid values in `gdf` given, from start value onwards.
+
+    New groupid values are provided sequenctially from `start` value
+    onwards.
+    """
+    replace_mapping =\
+        {v: start + i for i, v in enumerate(gdf.groupid.unique())}
+    gdf["groupid"] = gdf.groupid.replace(replace_mapping)
+    return gdf
+
 
 if __name__ == "__main__":
     # Imports
@@ -119,6 +297,24 @@ if __name__ == "__main__":
             "information out to. Can provide a relative or absolute path; "\
             "relative paths will be set relative to the path variable "\
             "specified in config."
+    )
+    parser.add_argument(
+        "--supto",
+        action = "store",
+        type = str,
+        metavar = "to/save/suppressed/gpkg",
+        default = None,
+        dest = "suppressed",
+        help =\
+            "Optional. Specify directory to save suppressed predictions file "\
+            "out to. The suppressed predictions are a GeoDataFrame of "\
+            "polygon masks. The format of saved output will be the extension "\
+            "of the filename passed. Can provide a relative or "\
+            "absolute path; relative paths will be set against the path "\
+            "variable specified in the config. If no argument is provided "\
+            "the suppressed predictions data will be will be saved as a "\
+            "geopckage -- suppressed-predictions.gpkg -- in the same "\
+            "directory the geopreds were saved out to."
     )
     cla_args = parser.parse_args()
 
@@ -204,6 +400,11 @@ if __name__ == "__main__":
                 f"lead to a csv (.csv) type file. Argument passed: "\
                 f"{cla_args.save_err_to}"
             )
+        suppressed_fp = (
+            parse_path(cla_args.suppressed, config["relative_path"])
+            if cla_args.suppressed is not None
+            else save_preds_dir.joinpath("suppressed-predictions.gpkg")
+        )
         
         logger.debug("Loading georefencing control points file")
         gcp = read_file(gcp_fp)
@@ -216,6 +417,9 @@ if __name__ == "__main__":
         )
         logger.debug("Save error data out.")
         errors.to_csv(save_err_fp)
+
+        logger.debug("Initialize GeoDataFrame to log suppressed records.")
+        suppressed = GeoDataFrame()
 
         logger.debug("Iterate through predictions for each ambiguous image")
         ambiguous_meta_filename_iter = [
@@ -233,22 +437,28 @@ if __name__ == "__main__":
                 metadata: dict = load_json(f)
             
             logger.debug("Load original clique predictions")
-            optional_preds = ambiguous_meta_fn.name
+            original_preds = ambiguous_meta_fn.name
             original_preds = read_file(meta_dir.joinpath(
-                optional_preds.replace("ambiguous-meta.json", "cliques.gpkg")
+                original_preds.replace("ambiguous-meta.json", "cliques.gpkg")
             ))
             original_preds = original_preds\
                 .rename(columns = {"clique_idx": "clique_id"})
+            original_preds["geometry"] = original_preds\
+                .geometry.buffer(0).convex_hull.centroid
             
             processed_preds = []
             logger.debug("Iterating through image metadata items")
             for img_fn, img_meta in metadata.items():
                 # get image predictions
-                img_preds =\
+                img_preds: GeoDataFrame =\
                     predictions[(predictions.png_filename == img_fn)].copy()
+                # Get root of png file name
+                img_preds["tiff_stem"] = img_meta["tiff_stem"]
+                # Create unique identifier field for each prediction
+                img_preds["pred_id"] = [*range(len(img_preds))]
 
                 if len(img_preds):
-                    # create clique bounding boxes for eath image snippet
+                    # create clique bounding boxes for each image snippet
                     boxes = []
                     box_iter = zip(
                         img_meta["cliques"],
@@ -268,7 +478,7 @@ if __name__ == "__main__":
                         })
                     boxes = GeoDataFrame(boxes)
 
-                    # Join bounding box cliques to predictions
+                    # Join bounding box of clique image snippets to predictions
                     img_preds = spatial_join(
                         img_preds,
                         boxes[["clique_id", "geometry"]],
@@ -276,6 +486,29 @@ if __name__ == "__main__":
                         predicate = "intersects"
                     )
                     
+                    # Drop any word predictions belonging to more than
+                    # one bounding box.
+                    img_preds, multibox_flag = extract_multibox_entities(
+                        gdf = img_preds,
+                        entity_col = "pred_id",
+                        box_id_col = "clique_id"
+                    )
+
+                    if len(multibox_flag):
+                        logger.info(
+                            f"{len(multibox_flag)} predictions spread across "\
+                            f"more than one image snippet."
+                        )
+                    
+                    # Add multibox suppressed records to suppressed logs
+                    suppressed = update_supressed_gdf(
+                        suppressed,
+                        multibox_flag,
+                        "Prediction spread across more than one image snippet"
+                    )
+                    
+                    # Get percent of polygons belonging within their respective
+                    # image snippet boxes
                     img_preds["intersect_pc"] = boxes\
                         .loc[img_preds.index_right.to_list(), "geometry"]\
                         .intersection(img_preds.geometry, align = False)\
@@ -289,6 +522,42 @@ if __name__ == "__main__":
                         .loc[img_preds.index_right.to_list(), "geometry"]
                     img_preds["geometry"] = img_preds\
                         .geometry.intersection(selection, align = False)
+                    
+                    # Break up groups spread across multiple image snippet
+                    # boxes
+                    img_preds, multibox_flag = extract_multibox_entities(
+                        gdf = img_preds,
+                        entity_col = "groupid",
+                        box_id_col = "clique_id"
+                    )
+                    
+                    logger.info(
+                        f"{len(multibox_flag)} records contained in groups "\
+                        f"spread across more than one image snippet."
+                    )
+                    if len(multibox_flag):
+                        # Pass back records to img_preds - group-clique by
+                        # group-clique
+                        temp = _get_minword_clique_groups(multibox_flag)
+                        # remove records from multibox_flag
+                        multibox_flag = multibox_flag[
+                            ~multibox_flag.pred_id.isin(set(temp.pred_id))
+                        ]
+                        # Add records back to img_preds
+                        img_preds =\
+                            concat([img_preds, multibox_flag], axis = 0)
+
+                    while len(multibox_flag):
+                        temp = _get_minword_clique_groups(multibox_flag)
+                        # remove records from multibox_flag
+                        multibox_flag = multibox_flag[
+                            ~multibox_flag.pred_id.isin(set(temp.pred_id))
+                        ]
+                        # Update groupids
+                        temp =\
+                            _update_groupids(temp, img_preds.groupid.max() + 1)
+                        # Add records back to img_preds
+                        img_preds = concat([img_preds,multibox_flag], axis = 0)
                     
                     # adjust prediction polygons by their associated clique
                     # box
@@ -313,25 +582,51 @@ if __name__ == "__main__":
                         selection = (img_preds.clique_id == clique)
                         img_preds.loc[selection, "geometry"] = img_preds\
                             .loc[selection, "geometry"]\
-                            .transform(trans, include_z = 0)
+                            .transform(trans, include_z = False)
                         # Documentation recommends calling close on
                         # GCPTransformer after calling transforms
                         gcp_trans.close()
                     
                     img_preds = img_preds.set_crs(gcp.crs)
                     img_preds.drop(columns = ["index_right"], inplace = True)
+                    
+                    # Reset index
+                    img_preds.reset_index(drop = True, inplace = True)
 
                     # keep only predictions from image snippets that intersect
-                    # with original predictions they are to replace
+                    # with the centroids of the original predictions they are
+                    # to replace
                     pairs = spatial_join(
                         img_preds,
                         original_preds,
                         how = "inner",
-                        predicate = "intersects",
+                        predicate = "contains",
                         on_attribute = "clique_id"
                     )
-                    img_preds = img_preds\
-                        .loc[pairs.index.unique().sort_values()]
+                    relevant_preds_idx = pairs.index.unique().sort_values()
+
+                    if (temp := len(img_preds) - len(relevant_preds_idx)):
+                        logger.info(
+                            f"{temp} predictions do not overlap with the "\
+                            f"centroids from the polygons originally marked "\
+                            f"as ambiguous."
+                        )
+                    
+                    # Add suppressed records to suppressed logs
+                    temp = img_preds.index.difference(relevant_preds_idx)
+                    suppressed = update_supressed_gdf(
+                        suppressed,
+                        img_preds.loc[temp].copy(),
+                        "Prediction does not overlap with the centroids from "\
+                        "the polygons originally marked as ambiguous"
+                    )
+                    img_preds = img_preds.loc[relevant_preds_idx]
+
+                    # Recalculate wordid values
+                    img_preds["wordid"] = img_preds\
+                        .groupby("groupid", as_index = True)\
+                        .wordid\
+                        .rank("first", ascending = True)
                     
                     # add img_preds to processed list
                     processed_preds.append(img_preds)
@@ -342,6 +637,8 @@ if __name__ == "__main__":
             processed_preds.to_file(save_preds_dir.joinpath(
                 img_meta["tiff_stem"] + ".gpkg"
             ))
+        # save suppressed predictions
+        suppressed.to_file(suppressed_fp)
 
     except Exception as e:
         logger.error(e, exc_info = True)
