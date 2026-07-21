@@ -12,7 +12,7 @@ from logging import getLogger
 from pickle import load as load_pickle
 import progressbar
 from numpy import array, clip, ndarray
-from geopandas import GeoDataFrame
+from geopandas import GeoDataFrame, GeoSeries
 from pandas import DataFrame
 from edina import get_transformer_from_geodataframe
 from shapely import Polygon
@@ -108,6 +108,35 @@ def pixel_ref_geometries(
     r, c = transformer.rowcol(coords[:, 0], coords[:, 1], op = None)
     cr_arr = array([*zip(c, r)]).astype("float64")
     return cr_arr
+
+
+def normalize_geometries(geo: GeoSeries) -> GeoSeries:
+    """
+    Normalizes geometries by converting MultiPolygon geometries into
+    single Polygon geometry times.
+
+    Calls `.buffer(0)` method, then calls `.convex_hull` on any
+    remaining MultiPolygons.
+
+    Parameters
+    ----------
+    geo: GeoSeries.
+        Required. Geometries to normalize.
+    
+    Return
+    ------
+    GeoSeries. Normalized geometries of Polygon type.
+    """
+    geo = geo.buffer(0)
+
+    selection = (
+        (geo.geom_type == "GeometryCollection")
+        | (geo.geom_type.str.startswith("Multi"))
+    )
+    if selection.sum():
+        geo.loc[selection] = geo.loc[selection].convex_hull
+    
+    return geo
 
 
 def _convert_ToponymExtractor_outputs_to_gdf_without_geotransforms(

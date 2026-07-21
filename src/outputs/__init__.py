@@ -2,7 +2,8 @@ from ._parse_toponym_outputs import (
     convert_ToponymExtractor_outputs_to_gdf,
     georeference_geometries,
     pixel_ref_geometries,
-    read_pickle_queue
+    read_pickle_queue,
+    normalize_geometries
 )
 from ._post_process import (
     get_intersecting_polygon_pairs,
