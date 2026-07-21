@@ -40,7 +40,7 @@ if __name__ == "__main__":
     from json import load as load_json
     from pandas import concat, merge as merge_dataframes
     from geopandas import read_file, GeoDataFrame
-    from project_utils import parse_path
+    from outputs import normalize_geometries
     from project_utils import parse_path, build_argument_parser, build_logger
 
     parser = build_argument_parser(filename = FILENAME, docstr = __doc__)
@@ -149,10 +149,7 @@ if __name__ == "__main__":
             )
 
             # Normalize geometries
-            mask_preds["geometry"] = mask_preds.geometry.buffer(0)
-            selection = (mask_preds.geom_type == "MultiPolygon")
-            mask_preds.loc[selection, "geometry"] = mask_preds\
-                .loc[selection, "geometry"].convex_hull
+            mask_preds["geometry"] = normalize_geometries(mask_preds.geometry)
 
             # Normalize groupid
             mask_preds["key"] =\
