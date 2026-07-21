@@ -11,3 +11,4 @@ data/tiffs
 __pycache__
 outputs/**/*.*
 !outputs/**/.gitkeep
+logs/*.log
