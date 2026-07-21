@@ -150,6 +150,8 @@ def get_predictions_in_ICDAR2025_format(
         for word in toponyms[groupid]:
             # remove wordid
             del word["wordid"]
+            # Ensure text is in string format
+            word["text"] = str(word["text"])
             # convert shape to list of xy pixel coordinates
             word["vertices"] = get_coordinates(word.pop("geometry")).tolist()
     
@@ -221,6 +223,8 @@ def get_ground_truths_in_ICDAR2025_format(
         for word in toponyms[groupid]:
             # remove wordid
             del word["wordid"]
+            # Ensure text is in string format
+            word["text"] = str(word["text"])
             # convert shape to list of xy pixel coordinates
             word["vertices"] = get_coordinates(word.pop("geometry")).tolist()
             # record whether the word was illegible
@@ -393,7 +397,8 @@ if __name__ == "__main__":
                 "bounding box."
             )
             gdf = gdf[gdf.geometry.intersects(tif_bounds)]
-            gdf["geometry"] = gdf.geometry.intersection(tif_bounds)
+            if not cla_args.ground_truth:
+                gdf["geometry"] = gdf.geometry.intersection(tif_bounds)
 
             logger.debug(f"Converting geometries.")
             gdf["geometry"] = gdf\
@@ -405,11 +410,13 @@ if __name__ == "__main__":
                 # remove non-text entries
                 gdf = gdf[~gdf.text.str.contains("$", regex = False)]
                 icdar2025.append({
-                    tiff_path.name: get_ground_truths_in_ICDAR2025_format(gdf)
+                    "image": tiff_path.name,
+                    "groups": get_ground_truths_in_ICDAR2025_format(gdf)
                 })
             else:
                 icdar2025.append({
-                    tiff_path.name: get_predictions_in_ICDAR2025_format(gdf)
+                    "image": tiff_path.name,
+                    "groups": get_predictions_in_ICDAR2025_format(gdf)
                 })
 
         logger.debug("Saving toponyms in ICDAR 2025 format to json.")
