@@ -39,7 +39,7 @@ if __name__ == "__main__":
     # Imports
     from json import load as load_json
     from pandas import concat, merge as merge_dataframes
-    from geopandas import read_file
+    from geopandas import read_file, GeoDataFrame
     from project_utils import parse_path
     from project_utils import parse_path, build_argument_parser, build_logger
 
@@ -144,10 +144,15 @@ if __name__ == "__main__":
             # load predictions
             mask_preds = [read_file(mask_fp) for mask_fp in mask_groups_fp]
             # concatenate predictions
-            mask_preds = concat(
-                [gdf[config["base_columns"]] for gdf in mask_preds],
-                ignore_index = True
+            mask_preds: GeoDataFrame = concat(
+                mask_preds, axis = 0, ignore_index = True
             )
+
+            # Normalize geometries
+            mask_preds["geometry"] = mask_preds.geometry.buffer(0)
+            selection = (mask_preds.geom_type == "MultiPolygon")
+            mask_preds.loc[selection, "geometry"] = mask_preds\
+                .loc[selection, "geometry"].convex_hull
 
             # Normalize groupid
             mask_preds["key"] =\
