@@ -12,7 +12,8 @@ derived, cropped to exclude the area where predictions were not verified
 
 - glamst17ne2-manually-labelled.gpkg: Refined manually labelled
 predictions. This file excludes unverified predictions, suppresses
-overlapping predictions, and removes false instances of word detections.
+predictions marked as overlapping, and removes false instances of word
+detections.
 """
 # Imports
 from typing import Final
