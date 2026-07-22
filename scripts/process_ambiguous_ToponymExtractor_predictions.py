@@ -443,8 +443,7 @@ if __name__ == "__main__":
             ))
             original_preds = original_preds\
                 .rename(columns = {"clique_idx": "clique_id"})
-            original_preds["geometry"] = original_preds\
-                .geometry.buffer(0).convex_hull.centroid
+            original_preds["geometry"] = original_preds.geometry.centroid
             
             processed_preds = []
             logger.debug("Iterating through image metadata items")
@@ -499,13 +498,12 @@ if __name__ == "__main__":
                             f"{len(multibox_flag)} predictions spread across "\
                             f"more than one image snippet."
                         )
-                    
-                    # Add multibox suppressed records to suppressed logs
-                    suppressed = update_supressed_gdf(
-                        suppressed,
-                        multibox_flag,
-                        "Prediction spread across more than one image snippet"
-                    )
+                        # Add multibox suppressed records to suppressed logs
+                        msg = "Prediction spread across more than one image "\
+                        "snippet"
+                        suppressed = update_supressed_gdf(
+                            suppressed, multibox_flag, msg
+                        )
                     
                     # Get percent of polygons belonging within their respective
                     # image snippet boxes
@@ -614,13 +612,14 @@ if __name__ == "__main__":
                     
                     # Add suppressed records to suppressed logs
                     temp = img_preds.index.difference(relevant_preds_idx)
-                    suppressed = update_supressed_gdf(
-                        suppressed,
-                        img_preds.loc[temp].copy(),
-                        "Prediction does not overlap with the centroids from "\
-                        "the polygons originally marked as ambiguous"
-                    )
-                    img_preds = img_preds.loc[relevant_preds_idx]
+                    if len(temp):
+                        suppressed = update_supressed_gdf(
+                            suppressed,
+                            img_preds.loc[temp].copy(),
+                            "Prediction does not overlap with the centroids "\
+                            "from the polygons originally marked as ambiguous."
+                        )
+                        img_preds = img_preds.loc[relevant_preds_idx]
 
                     # Recalculate wordid values
                     img_preds["wordid"] = img_preds\
