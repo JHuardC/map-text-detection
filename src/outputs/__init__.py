@@ -11,3 +11,5 @@ from ._post_process import (
     ProcessToponymExtractorPredictions,
     ProcessToponymExtractorPredictionsV2
 )
+from ._manipulate import\
+    aggregate_words_to_toponym, build_toponym_text, build_toponym_gdf
