@@ -79,7 +79,7 @@ def parse_path(path: str, relative_to_envar: str | None = None) -> Path:
     return Path(root).joinpath(path)
 
 
-def build_argument_parser(filename: str, docstr: str) -> ArgumentParser:
+def build_argument_parser(filename: str, description: str) -> ArgumentParser:
     """
     Builds Command Line Argument Parser with default arguments set.
 
@@ -88,8 +88,9 @@ def build_argument_parser(filename: str, docstr: str) -> ArgumentParser:
     filename: str.
         Required. Name of the script the function is being called from.
 
-    docstr: str.
-        Required. Doc string of script to build argument parser for.
+    description: str.
+        Required. Description string explaining the purpose of the
+        script.
     
     Returns
     -------
@@ -104,7 +105,8 @@ def build_argument_parser(filename: str, docstr: str) -> ArgumentParser:
     project root dir.
     """
     parser = ArgumentParser(
-        description = __doc__, formatter_class = RawDescriptionHelpFormatter
+        description = description,
+        formatter_class = RawDescriptionHelpFormatter
     )
     parser.add_argument(
         "-c", "--config",
