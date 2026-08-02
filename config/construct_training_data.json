@@ -1,0 +1,11 @@
+{
+    "png_h": 1500,
+    "png_w": 2000,
+    "overlap": 0,
+    "crs": "EPSG:27700",
+    "start_h": 0,
+    "start_w": 0,
+    "test_size": 1,
+    "random_state": 17,
+    "relative_path": "LOCAL_DIR"
+}
