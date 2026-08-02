@@ -238,7 +238,17 @@ if __name__ == "__main__":
     from project_utils import parse_path, build_argument_parser, build_logger
     from outputs import build_toponym_gdf
 
-    parser = build_argument_parser(filename = FILENAME, docstr = __doc__)
+    parser = build_argument_parser(
+        filename = FILENAME,
+        description =\
+            "Builds custom metrics using the predictions and ground truths "\
+            "provided. Produces the following metrics: \"Loose Toponym "\
+            "Detection Recall\", \"Loose Toponym Detection Precision\", "\
+            "\"Strict Toponym Detection Recall\", \"Strict Toponym Detection "\
+            "Prescision\", \"Loose Toponym Recognition Recall\", \"Loose "\
+            "Toponym Recognition Prescision\", \"Strict Toponym Recognition "\
+            "Recall\", and \"Strict Toponym Recognition Precsion\"."
+    )
     parser.add_argument(
         "preds",
         action = "store",
@@ -257,11 +267,11 @@ if __name__ == "__main__":
         type = str,
         metavar = "read/geo/ground/truths/from",
         help =\
-            "Required. Specify directory to read geo-encoded predictions "\
-            "from. The filenames in the directory are expected to correspond "\
-            "to the TIFF filenames the text instances belong within. Can "\
-            "provide a relative or absolute path; relative paths will be set "\
-            "relative to the path variable specified in config."
+            "Required. Specify directory to read geo-encoded ground-truth "\
+            "labels from. The filenames in the directory are expected to "\
+            "correspond to the TIFF filenames the text instances belong "\
+            "within. Can provide a relative or absolute path; relative paths "\
+            "will be set relative to the path variable specified in config."
     )
     parser.add_argument(
         "dest",

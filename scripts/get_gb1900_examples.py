@@ -106,7 +106,7 @@ if __name__ == "__main__":
     from project_utils import parse_path
     from project_utils import parse_path, build_argument_parser, build_logger
 
-    parser = build_argument_parser(filename = FILENAME, docstr = __doc__)
+    parser = build_argument_parser(filename = FILENAME, description = __doc__)
     parser.add_argument(
         "meta_dir",
         action = "store",

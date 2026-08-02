@@ -243,7 +243,12 @@ if __name__ == "__main__":
     from project_utils import parse_path
     from project_utils import parse_path, build_argument_parser, build_logger
 
-    parser = build_argument_parser(filename = FILENAME, docstr = __doc__)
+    parser = build_argument_parser(
+        filename = FILENAME,
+        description =\
+            "Convert map text instances in geodata format to ICDAR 2025 - "\
+            "Historical Map Text Recognition format."
+    )
     parser.add_argument(
         "geodata",
         action = "store",

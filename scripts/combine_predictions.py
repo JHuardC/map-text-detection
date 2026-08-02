@@ -43,7 +43,12 @@ if __name__ == "__main__":
     from outputs import normalize_geometries
     from project_utils import parse_path, build_argument_parser, build_logger
 
-    parser = build_argument_parser(filename = FILENAME, docstr = __doc__)
+    parser = build_argument_parser(
+        filename = FILENAME,
+        description =\
+            "Combines polygon mask predictions from multiple sources into "\
+            "single files."
+    )
     parser.add_argument(
         "save_dir",
         action = "store",

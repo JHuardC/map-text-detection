@@ -198,9 +198,7 @@ def _get_minword_clique_groups(gdf: GeoDataFrame) -> GeoDataFrame:
     same clique.
     """
     return concat(
-        [*_yield_group_minword_clique(gdf)],
-        axis = 0,
-        ignore_index = True
+        [*_yield_group_minword_clique(gdf)], axis = 0, ignore_index = True
     )
 
 
@@ -232,7 +230,12 @@ if __name__ == "__main__":
     from project_utils import parse_path
     from project_utils import parse_path, build_argument_parser, build_logger
 
-    parser = build_argument_parser(filename = FILENAME, docstr = __doc__)
+    parser = build_argument_parser(
+        filename = FILENAME,
+        description =\
+            "Script to process the ambiguous predictions from the "\
+            "ToponymExtractor model."
+    )
     parser.add_argument(
         "meta_img",
         action = "store",

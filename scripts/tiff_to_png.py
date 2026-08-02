@@ -28,7 +28,7 @@ if __name__ == "__main__":
     from edina import EDINATiffPNGConverter
     from project_utils import parse_path, build_argument_parser, build_logger
 
-    parser = build_argument_parser(filename = FILENAME, docstr = __doc__)
+    parser = build_argument_parser(filename = FILENAME, description = __doc__)
     parser.add_argument(
         "tiff_dir",
         action = "store",
@@ -113,6 +113,7 @@ if __name__ == "__main__":
         raise
 
     try:
+        # set up kwargs for calling on converter
         converter_kwargs = {
             "tiff_paths": tiff_dir.glob("*.tif"),
             "png_dest": png_dir,

@@ -45,7 +45,13 @@ if __name__ == "__main__":
     from rasterio.mask import mask as mask_raster
     from shapely import box, difference
 
-    parser = build_argument_parser(filename = FILENAME, docstr = str)
+    parser = build_argument_parser(
+        filename = FILENAME,
+        description =\
+            "Manually labelled file is cleansed of records not verified. "\
+            "Cropped copy of the TIFF image the labels were derived from is "\
+            "also saved out."
+    )
     cla_args = parser.parse_args()
 
     logger = build_logger(

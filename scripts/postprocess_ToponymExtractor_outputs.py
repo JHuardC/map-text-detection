@@ -184,7 +184,12 @@ if __name__ == "__main__":
     from project_utils import parse_path
     from project_utils import parse_path, build_argument_parser, build_logger
 
-    parser = build_argument_parser(filename = FILENAME, docstr = __doc__)
+    parser = build_argument_parser(
+        filename = FILENAME,
+        description =\
+            "Script to post-process the extracted polygons from the "\
+            "ToponymExtractor model predictions."
+    )
     parser.add_argument(
         "tiff_dir",
         action = "store",
