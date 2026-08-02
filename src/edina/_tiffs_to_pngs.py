@@ -3,6 +3,8 @@ Converts directory of EDINA tiff files to PNGs.
 """
 # Imports
 from typing import Final
+from abc import abstractmethod
+from functools import partial
 from logging import getLogger
 from collections.abc import Iterable
 from pathlib import Path
@@ -29,22 +31,61 @@ _WIDGETS: Final[list] = [
      progressbar.ETA(), '|'
 ]
 
-class EDINATiffPNGConverter:
-    def __init__(self):
-        pass
+def get_edina_tiff_data(
+    tiff_path: Path | str
+) -> tuple[ndarray, AffineTransformer, CRS, tuple[int, int]]:
+    """
+    Load TIFF file downloaded from EDINA and retrieve image, geodata,
+    and metadata.
 
-    def _get_raster_data(
-        self, tiff_path: Path
-    ) -> tuple[ndarray, AffineTransformer, CRS, tuple[int, int]]:
-        """Open EDINA tiff file and extract relevant data."""
-        with open_raster(tiff_path, mode = "r") as src:
-            tiff_height = src.height # image height
-            tiff_width = src.width # image width
-            tiff_transformer = AffineTransformer(src.transform) # transformer
-            tiff_crs = src.read_crs() # coordinate reference system
-            data = (-src.read() + 1) * 255 # image array
-        
-        return data, tiff_transformer, tiff_crs, (tiff_height, tiff_width)
+    Image is converted from binary to greyscale format.
+
+    Parameters
+    ----------
+    raster_path: Path or string.
+        Required. Path to EDINA downloaded TIFF file, the images in this
+        file are in binary format.
+    
+    Returns
+    -------
+    4-element tuple:
+
+    1. ndarray: (1, H, W) Grey-scale representation of the raster image.
+    2. AffineTransformer: Georeferencing transformer, converting pixel
+    locations to map crs coordinates and vice versa.
+    3. CRS: Coordinate reference system for map coordinates.
+    4. (H, W): Dimensions of the image, matches dimensions two and three
+    of ndarray in element 1.
+    """
+    with open_raster(tiff_path, mode = "r") as src:
+        tiff_height = src.height # image height
+        tiff_width = src.width # image width
+        tiff_transformer = AffineTransformer(src.transform) # transformer
+        tiff_crs = src.read_crs() # coordinate reference system
+        data = (-src.read() + 1) * 255 # image array
+    
+    return data, tiff_transformer, tiff_crs, (tiff_height, tiff_width)
+
+
+class _ImageArraySplitter:
+
+    @abstractmethod
+    def _get_arr_split_idxs(self, *args, **kwargs) -> list[int]:
+        pass
+    
+    def get_pixel_rowcol_idxs(
+        self, row_args: tuple, col_args: tuple
+    ) -> list[tuple[int, int]]:
+        """
+        Override this function to unpack row arguments and column
+        arguments.
+        """
+        row_splits = self._get_arr_split_idxs(*row_args)
+        col_splits = self._get_arr_split_idxs(*col_args)
+        return [(row, col) for row in row_splits for col in col_splits]
+
+
+class _SplitWithOverlap(_ImageArraySplitter):
 
     def _get_arr_split_idxs(
         self, img_dim: int, partsize_dim: int, overlap: int, start: int = 0
@@ -66,8 +107,8 @@ class EDINATiffPNGConverter:
         # partsize dim
         split_idxs = [*split_idxs[: -1], img_dim - partsize_dim]
         return split_idxs
-    
-    def _get_pixel_rowcol_idxs(
+
+    def get_pixel_rowcol_idxs(
         self,
         arr_h: int,
         arr_w: int,
@@ -75,14 +116,57 @@ class EDINATiffPNGConverter:
         part_w: int,
         overlap: int,
         start_h: int,
-        start_w: int
+        start_w: int,
+        **kwargs
     ) -> list[tuple[int, int]]:
         """
         Get index values used to split the image array.
         """
-        row_splits = self._get_arr_split_idxs(arr_h, part_h, overlap, start_h)
-        col_splits = self._get_arr_split_idxs(arr_w, part_w, overlap, start_w)
-        return [(row, col) for row in row_splits for col in col_splits]
+        row_args = arr_h, part_h, overlap, start_h
+        col_args = arr_w, part_w, overlap, start_w
+        return super().get_pixel_rowcol_idxs(row_args, col_args)
+
+
+class _SplitWithoutOverlap(_ImageArraySplitter):
+
+    def _get_arr_split_idxs(
+        self, img_dim: int, partsize_dim: int, start: int = 0
+    ) -> list[int]:
+        """
+        Get index values used to split the image array along a specific
+        dimension.
+        """
+        # Initial index values to split along - final split index will
+        # need adjustment
+        split_idxs = [*range(start, img_dim, partsize_dim)]
+
+        # Drop final split index if remainder is not a full partsize image
+        if img_dim - split_idxs[-1] < partsize_dim:
+            split_idxs = split_idxs[:-1]
+
+        return split_idxs
+
+    def get_pixel_rowcol_idxs(
+        self,
+        arr_h: int,
+        arr_w: int,
+        part_h: int,
+        part_w: int,
+        start_h: int,
+        start_w: int,
+        **kwargs
+    ) -> list[tuple[int, int]]:
+        """
+        Get index values used to split the image array.
+        """
+        row_args = arr_h, part_h, start_h
+        col_args = arr_w, part_w, start_w
+        return super().get_pixel_rowcol_idxs(row_args, col_args)
+
+
+class EDINATiffPNGConverter:
+    def __init__(self):
+        pass
     
     def _create_image_and_meta(
         self,
@@ -204,16 +288,25 @@ class EDINATiffPNGConverter:
         - "geometry": shapely.Point. Contains the coordinates for the
         control points encoded under the crs provided.
         """
-        tiffarr, transformer, crs, hw = self._get_raster_data(tiff_path)
+        # Get image clipper
+        clipper = (
+            _SplitWithOverlap() if overlap > 0 else _SplitWithoutOverlap()
+        )
+        clipper = partial(
+            clipper.get_pixel_rowcol_idxs,
+            overlap = overlap,
+            start_h = start_h,
+            start_w = start_w
+        )
+
+        tiffarr, transformer, crs, hw = get_edina_tiff_data(tiff_path)
         
         # If png dimensions were not specified, make them equal to the
         # tiff dimensions
         png_h = hw[0] if png_h is None else png_h
         png_w = hw[1] if png_w is None else png_w
 
-        pixel_rowcol_split_idxs = self._get_pixel_rowcol_idxs(
-            *hw, png_h, png_w, overlap, start_h, start_w
-        )
+        pixel_rowcol_split_idxs = clipper(*hw, png_h, png_w)
 
         control_points_meta = []
         for idx, (row, col) in enumerate(pixel_rowcol_split_idxs, start = 1):
@@ -338,6 +431,17 @@ class EDINATiffPNGConverter:
             raise ValueError(
                 "No tiff files found in tiff_paths iterable passed"
             )
+        
+        # Get image clipper
+        clipper = (
+            _SplitWithOverlap() if overlap > 0 else _SplitWithoutOverlap()
+        )
+        clipper = partial(
+            clipper.get_pixel_rowcol_idxs,
+            overlap = overlap,
+            start_h = start_h,
+            start_w = start_w
+        )
 
         # Construct progressbar
         progress = progressbar\
@@ -350,19 +454,16 @@ class EDINATiffPNGConverter:
             progress.start()
 
             tiffarr, transformer, crs, self._hw =\
-                self._get_raster_data(tiff_path)
+                get_edina_tiff_data(tiff_path)
             progress.increment(1)
             
             # store arguments for deriving row-col split indices.
             args = (
                 *self._hw,
                 self._hw[0] if png_h is None else png_h,
-                self._hw[1] if png_w is None else png_w,
-                overlap,
-                start_h,
-                start_w
+                self._hw[1] if png_w is None else png_w
             )
-            pxl_rc_split_idxs = self._get_pixel_rowcol_idxs(*args)
+            pxl_rc_split_idxs = clipper(*args)
 
             control_points_records = []
             for idx, (row, col) in enumerate(pxl_rc_split_idxs, start = 1):
@@ -393,8 +494,7 @@ class EDINATiffPNGConverter:
             while 1:
 
                 tiff_path = next(tiff_paths)
-                tiffarr, transformer, crs, hw =\
-                    self._get_raster_data(tiff_path)
+                tiffarr, transformer, crs, hw = get_edina_tiff_data(tiff_path)
                 progress.increment(1)
                 
                 # Check new tiff has same height-width dimensions as the
@@ -407,11 +507,8 @@ class EDINATiffPNGConverter:
                         *self._hw,
                         self._hw[0] if png_h is None else png_h,
                         self._hw[1] if png_w is None else png_w,
-                        overlap,
-                        start_h,
-                        start_w
                     )
-                    pxl_rc_split_idxs = self._get_pixel_rowcol_idxs(*args)
+                    pxl_rc_split_idxs = clipper(*args)
                 
                 control_points_records = []
                 for idx, (row, col) in enumerate(pxl_rc_split_idxs, start = 1):
