@@ -24,6 +24,7 @@ _ID_CHAR_LOOKUP: dict[int, str] = dict(enumerate([
     'z','{','|','}','~'
 ]))
 _CHAR_ID_LOOKUP: dict[str, int] = {v: k for k, v in _ID_CHAR_LOOKUP.items()}
+_PAD_ID: int = 96
 
 
 def _get_dict_order(d: dict, ord_k: Hashable) -> int | float:
@@ -36,7 +37,8 @@ def _get_dict_order(d: dict, ord_k: Hashable) -> int | float:
 
 def get_annotations_in_detectron2_format(
     gdf: GeoDataFrame,
-    text_col: Hashable
+    text_col: Hashable,
+    text_size: int
 ) -> dict[
     str,
     str | int | dict[str, list[float] | list[list[float]] | int | str]
@@ -55,6 +57,11 @@ def get_annotations_in_detectron2_format(
     
     text_col: Hashable.
         Required. Column name for the annotated text value.
+
+    text_size: int.
+        Required. Length of text fields, must be equal for all records
+        so shorter texts are filled with 96 - Representing a padding
+        char.
     
     Returns
     -------
@@ -109,6 +116,9 @@ def get_annotations_in_detectron2_format(
         if sum(anno["text"]) == 0:
             # If there is no text, do not include the annotation
             continue
+        # Truncate or add padding to text
+        anno["text"] = anno["text"][: text_size]
+        anno["text"] += ([_PAD_ID] * (text_size - len(anno["text"])))
 
         # Combine annotation with annotation constants and add to annotations
         annotations.append(dict((*anno.items(), *_ANNOTATION_CONSTANTS)))

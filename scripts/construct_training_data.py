@@ -297,6 +297,9 @@ if __name__ == "__main__":
             labels = labels[~labels.word.isna()]
             labels["word"] = labels.word.astype("str")
 
+            # Get longest text string for consistent size padding
+            text_length = labels.word.str.len().max()
+
             logger.debug(f"Get bounds for pngs derived from current TIFF.")
             selection = (png_bounds.tiff_filename == tiff_path.name)
 
@@ -334,7 +337,7 @@ if __name__ == "__main__":
 
                 # Add annotations to record
                 record["annotations"] = get_annotations_in_detectron2_format(
-                    gdf = png_labels, text_col = "word"
+                    gdf=png_labels, text_col="word", text_size=text_length
                 )
 
                 logger.debug(
