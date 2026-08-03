@@ -1,4 +1,5 @@
 {
+    "image_mode": "RGB",
     "png_h": 1500,
     "png_w": 2000,
     "overlap": 0,

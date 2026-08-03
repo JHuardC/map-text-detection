@@ -164,9 +164,45 @@ class _SplitWithoutOverlap(_ImageArraySplitter):
         return super().get_pixel_rowcol_idxs(row_args, col_args)
 
 
-class EDINATiffPNGConverter:
-    def __init__(self):
+class _ImageSaver:
+    @staticmethod
+    @abstractmethod
+    def save_image(img: Image, path: str | Path, *args, **kwargs) -> None:
         pass
+
+class _AutoSaver(_ImageSaver):
+    @staticmethod
+    def save_image(img: Image, path: str | Path, *args, **kwargs) -> None:
+        img.save(path)
+        return None
+
+class _SaveInMode(_ImageSaver):
+    "Converts image to specified mode"
+    @staticmethod
+    def save_image(
+        img: Image, path: str | Path, img_mode: str, *args, **kwargs
+    ) -> None:
+        img.convert(mode = img_mode).save(path)
+        return None
+
+
+class EDINATiffPNGConverter:
+    def __init__(self, img_mode: str | None = None):
+        """
+        Converts EDINA downloaded TIFF files to clipped PNG Images with
+        georeferencing metadata.
+
+        Parameters
+        ----------
+        img_mode: str or None. Default: None.
+            Optional. Mode the image should be saved as, e.g. "L", or
+            "RGB". If no argument is passed, image will not be
+            converted before being saved out.
+        """
+        self.image_mode = img_mode
+        # Construct image saver function
+        check = (img_mode is None)
+        self._image_saver = (_AutoSaver if check else _SaveInMode).save_image
     
     def _create_image_and_meta(
         self,
@@ -336,7 +372,11 @@ class EDINATiffPNGConverter:
                 png_filename
             )
             control_points_meta += ctrl_points
-            img.save(png_dest.joinpath(png_filename))
+            self._image_saver(
+                img,
+                png_dest.joinpath(png_filename),
+                img_mode = self.image_mode
+            )
             logger.info(
                 f"Image {png_dest.joinpath(png_filename).stem} saved out"
             )
@@ -481,7 +521,11 @@ class EDINATiffPNGConverter:
                     png_filename
                 )
                 control_points_records += ctrl_points
-                img.save(png_dest.joinpath(png_filename))
+                self._image_saver(
+                    img,
+                    png_dest.joinpath(png_filename),
+                    img_mode = self.image_mode
+                )
                 logger.info(
                     f"Image {png_dest.joinpath(png_filename).stem} saved "\
                     "out."
@@ -527,7 +571,11 @@ class EDINATiffPNGConverter:
                     )
                     control_points_records += ctrl_points
                     # Save image out
-                    img.save(png_dest.joinpath(png_filename))
+                    self._image_saver(
+                        img,
+                        png_dest.joinpath(png_filename),
+                        img_mode = self.image_mode
+                    )
                     logger.info(
                         f"Image {png_dest.joinpath(png_filename).stem} saved "\
                         "out."

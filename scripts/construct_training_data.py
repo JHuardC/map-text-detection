@@ -228,7 +228,7 @@ if __name__ == "__main__":
         logger.debug(f"Found {len(labels_tiffs_fps)} annotation-image pairs")
 
         # instance EDINATiffPNGConverter
-        converter = EDINATiffPNGConverter()
+        converter = EDINATiffPNGConverter(img_mode = config["image_mode"])
 
     except Exception as e:
         logger.error(e, exc_info = True)
