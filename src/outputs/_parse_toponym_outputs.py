@@ -492,3 +492,319 @@ def convert_ToponymExtractor_outputs_to_gdf(
         return _convert_ToponymExtractor_outputs_to_gdf_without_geotransforms(
             out = out, png_h = png_h, png_w = png_w
         )
+
+
+def _convert_deepsolo_outputs_to_gdf_without_geotransforms(
+    out: list[dict[str, str | list[list[dict[str, str | list[list[float]]]]]]],
+    png_h: int,
+    png_w: int
+) -> tuple[GeoDataFrame, DataFrame]:
+    """
+    Create GeoDataFrame from deepsolo word-level predictions.
+
+    DeepSolo model sourced from:
+    https://github.com/SesamePaste233/ToponymExtractor/tree/main
+
+    Parameters
+    ----------
+    out: DeepSolo outputs.
+        Required. DeepSolo outputs are saved in ICDAR 2025
+        map text dataset format, which is a list of dictionaries:
+            - "image": string. Name of image png the associated outputs
+            are inferenced from.
+            - "words": list of dictionaries. Each list of
+            dictionaries is a word prediction containing details of the
+            prediction such as location, text, and score.
+    png_h: int.
+        Required. Height dimension of the image passed to the
+        ToponymExtractor model. Needed to clip image vertices.
+    png_w: int.
+        Required. Width dimension of the image passed to the
+        ToponymExtractor model. Needed to clip image vertices.
+    control_points: GeoDataFrame or None.
+        Optional. GeoDataFrame containing the details of the control
+        points used for georeferencing each png. GeoDataFrame requires
+        the fields: "png_filename", "pixel_x", "pixel_y", "geometry". If
+        no control points are passed, then polygons are not
+        georeferenced.
+
+    Returns
+    -------
+    Two element tuple:
+    1. GeoDataFrame. Extracted data, each record represents a word with
+    the associated mask. Columns include:
+        - png_filename: string. Name of image png the associated outputs
+        are inferenced from.
+        - word: string. Parsed text from the DeepSolo.
+        - score: string. Confidence score for the predicted word.
+        - geometry: Polygon. Mask for the associated text, if 
+        georeferencing was applied, then coordinates are in OSGB36
+        format (EPSG:27700), otherwise polygon coordinates are pixel
+        coordinate values.
+    2. DataFrame. Records log images that DeepSolo did not
+    produce outputs for due to errors at inference time. Columns are:
+        - png_filename: string. Name of image png the DeepSolo
+        errored on during inference.
+        - error: string. Details the error that was thrown.
+    """
+    pngs, errors, data = set(), [], []
+    for image in out:
+        # Check record has not been seen before
+        if image["image"] not in pngs:
+            # Update seen pngs log
+            pngs.add(image["image"])
+
+            for i, word in enumerate(image["words"]):
+                # some records errored out - so only upack those with expected
+                # formats
+                if "error" not in word:
+                    # Create record
+                    record = {
+                        "png_filename": image["image"],
+                        "center_bezier_pts": word["center_bezier_pts"],
+                        "avg_height": word["avg_height"],
+                        "wordid": i,
+                        "word": word["text"],
+                        "score": word["score"]
+                    }
+                    # Clip vertices to within the bounds of image
+                    vertices = array([
+                        [*el]
+                        for el
+                        in zip(word["polygon_x"], word["polygon_y"])
+                    ])
+                    vertices[:, 0] =\
+                        clip(vertices[:, 0], 0., float(png_w - 1))
+                    vertices[:, 1] =\
+                        clip(vertices[:, 1], 0., float(png_h - 1))
+                    vertices = vertices.tolist()
+
+                    record["geometry"] = Polygon(vertices).buffer(0)
+                    
+                    # Add record to data
+                    data.append(record)
+
+                else:
+                    # Error handling
+                    errors.append({
+                        "png_filename": image["image"], "error": image["error"]
+                    })
+
+    # Convert record lists to frames
+    data, errors = GeoDataFrame(data), DataFrame(errors)
+    data["geometry"] = normalize_geometries(data["geometry"])
+
+    # log parsing details
+    pngs = data["png_filename"].nunique()
+    words = len(data)
+    logger.info(
+        f"Outputs extracted for {pngs:,} PNGs: {words:,} text instances. "\
+        f"{data["geometry"].isna().sum():,} records missing masks."
+    )
+    if len(errors):
+        logger\
+            .info(f"Encountered error records for {len(errors)} PNG records.")
+
+    return data, errors
+
+
+def _convert_deepsolo_outputs_to_gdf_with_geotransforms(
+    out: list[dict[str, str | list[list[dict[str, str | list[list[float]]]]]]],
+    png_h: int,
+    png_w: int,
+    control_points: GeoDataFrame | None = None
+) -> tuple[GeoDataFrame, DataFrame]:
+    """
+    Create GeoDataFrame from deepsolo word-level predictions.
+
+    DeepSolo model sourced from:
+    https://github.com/SesamePaste233/ToponymExtractor/tree/main
+
+    Parameters
+    ----------
+    out: DeepSolo outputs.
+        Required. DeepSolo outputs are saved in ICDAR 2025
+        map text dataset format, which is a list of dictionaries:
+            - "image": string. Name of image png the associated outputs
+            are inferenced from.
+            - "words": list of dictionaries. Each list of
+            dictionaries is a word prediction containing details of the
+            prediction such as location, text, and score.
+    png_h: int.
+        Required. Height dimension of the image passed to the
+        ToponymExtractor model. Needed to clip image vertices.
+    png_w: int.
+        Required. Width dimension of the image passed to the
+        ToponymExtractor model. Needed to clip image vertices.
+    control_points: GeoDataFrame or None.
+        Optional. GeoDataFrame containing the details of the control
+        points used for georeferencing each png. GeoDataFrame requires
+        the fields: "png_filename", "pixel_x", "pixel_y", "geometry". If
+        no control points are passed, then polygons are not
+        georeferenced.
+
+    Returns
+    -------
+    Two element tuple:
+    1. GeoDataFrame. Extracted data, each record represents a word with
+    the associated mask. Columns include:
+        - png_filename: string. Name of image png the associated outputs
+        are inferenced from.
+        - word: string. Parsed text from the DeepSolo.
+        - score: string. Confidence score for the predicted word.
+        - geometry: Polygon. Mask for the associated text, if 
+        georeferencing was applied, then coordinates are in OSGB36
+        format (EPSG:27700), otherwise polygon coordinates are pixel
+        coordinate values.
+    2. DataFrame. Records log images that DeepSolo did not
+    produce outputs for due to errors at inference time. Columns are:
+        - png_filename: string. Name of image png the DeepSolo
+        errored on during inference.
+        - error: string. Details the error that was thrown.
+    """
+    pngs, errors, data = set(), [], []
+    for image in out:
+        # Check record has not been seen before
+        if image["image"] not in pngs:
+            # Update seen pngs log
+            pngs.add(image["image"])
+
+            for i, word in enumerate(image["words"]):
+                # some records errored out - so only upack those with expected
+                # formats
+                if "error" not in word:
+                    # Create record
+                    record = {
+                        "png_filename": image["image"],
+                        "center_bezier_pts": word["center_bezier_pts"],
+                        "avg_height": word["avg_height"],
+                        "wordid": i,
+                        "word": word["text"],
+                        "score": word["score"]
+                    }
+                    # Clip vertices to within the bounds of image
+                    vertices = array([
+                        [*el]
+                        for el
+                        in zip(word["polygon_x"], word["polygon_y"])
+                    ])
+                    vertices[:, 0] =\
+                        clip(vertices[:, 0], 0., float(png_w - 1))
+                    vertices[:, 1] =\
+                        clip(vertices[:, 1], 0., float(png_h - 1))
+                    vertices = vertices.tolist()
+
+                    # Get georeference control points transformer
+                    gcp_trans = control_points.loc[
+                        control_points["png_filename"] == image["image"]
+                    ]
+                    if len(gcp_trans):
+                        gcp_trans =\
+                            get_transformer_from_geodataframe(gcp_trans)
+                        # Convert pixel location coordinates to latitude/
+                        # longitude and create geometry field
+                        record["geometry"] = Polygon([
+                            gcp_trans.xy(r, c) for c, r in vertices
+                        ])
+                        # Documentation recommends calling close on
+                        # GCPTransformer after calling transforms
+                        gcp_trans.close()
+                    else:
+                        logger.warning(
+                            f"Georeferencing control points not found "\
+                            f"for image {image["image"]}"
+                        )
+                        record["geometry"] = None
+                    
+                    # Add record to data
+                    data.append(record)
+
+                else:
+                    # Error handling
+                    errors.append({
+                        "png_filename": image["image"], "error": image["error"]
+                    })
+
+    data = GeoDataFrame(data, crs = control_points.crs)
+    data["geometry"] = normalize_geometries(data["geometry"])
+    errors = DataFrame(errors)
+
+    # log parsing details
+    pngs = data["png_filename"].nunique()
+    words = len(data)
+    logger.info(
+        f"Outputs extracted for {pngs:,} PNGs: {words:,} text instances. "\
+        f"{data["geometry"].isna().sum():,} records missing masks."
+    )
+    if len(errors):
+        logger\
+            .info(f"Encountered error records for {len(errors)} PNG records.")
+
+    return data, errors
+
+
+def convert_deepsolo_outputs_to_gdf(
+    out: list[dict[str, str | list[list[dict[str, str | list[list[float]]]]]]],
+    png_h: int,
+    png_w: int,
+    control_points: GeoDataFrame | None = None
+) -> tuple[GeoDataFrame, DataFrame]:
+    """
+    Create GeoDataFrame from deepsolo word-level predictions.
+
+    DeepSolo model sourced from:
+    https://github.com/SesamePaste233/ToponymExtractor/tree/main
+
+    Parameters
+    ----------
+    out: DeepSolo outputs.
+        Required. DeepSolo outputs are saved in ICDAR 2025
+        map text dataset format, which is a list of dictionaries:
+            - "image": string. Name of image png the associated outputs
+            are inferenced from.
+            - "words": list of dictionaries. Each list of
+            dictionaries is a word prediction containing details of the
+            prediction such as location, text, and score.
+    png_h: int.
+        Required. Height dimension of the image passed to the
+        ToponymExtractor model. Needed to clip image vertices.
+    png_w: int.
+        Required. Width dimension of the image passed to the
+        ToponymExtractor model. Needed to clip image vertices.
+    control_points: GeoDataFrame or None.
+        Optional. GeoDataFrame containing the details of the control
+        points used for georeferencing each png. GeoDataFrame requires
+        the fields: "png_filename", "pixel_x", "pixel_y", "geometry". If
+        no control points are passed, then polygons are not
+        georeferenced.
+
+    Returns
+    -------
+    Two element tuple:
+    1. GeoDataFrame. Extracted data, each record represents a word with
+    the associated mask. Columns include:
+        - png_filename: string. Name of image png the associated outputs
+        are inferenced from.
+        - word: string. Parsed text from the DeepSolo.
+        - score: string. Confidence score for the predicted word.
+        - geometry: Polygon. Mask for the associated text, if 
+        georeferencing was applied, then coordinates are in OSGB36
+        format (EPSG:27700), otherwise polygon coordinates are pixel
+        coordinate values.
+    2. DataFrame. Records log images that DeepSolo did not
+    produce outputs for due to errors at inference time. Columns are:
+        - png_filename: string. Name of image png the DeepSolo
+        errored on during inference.
+        - error: string. Details the error that was thrown.
+    """
+    if control_points is not None:
+        return _convert_deepsolo_outputs_to_gdf_with_geotransforms(
+            out = out,
+            control_points = control_points,
+            png_h = png_h,
+            png_w = png_w
+        )
+    else:
+        return _convert_deepsolo_outputs_to_gdf_without_geotransforms(
+            out = out, png_h = png_h, png_w = png_w
+        )
