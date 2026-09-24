@@ -474,7 +474,7 @@ if __name__ == "__main__":
                 )
                 pad = (
                     pad_h
-                    if (pad := (max_h - ambiguous_img.shape[0])) > pad_w
+                    if (pad := (max_h - ambiguous_img.shape[0])) > pad_h
                     else pad
                 )
                 ambiguous_img = pad_array(
@@ -524,7 +524,7 @@ if __name__ == "__main__":
                     )
                     pad = (
                         pad_h
-                        if (pad := (max_h - img_snippet.shape[0])) > pad_w
+                        if (pad := (max_h - img_snippet.shape[0])) > pad_h
                         else pad
                     )
                     img_snippet = pad_array(
