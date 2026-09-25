@@ -6,6 +6,7 @@ data/**/*.txt
 data/**/*.tab
 data/**/*.gpkg
 data/**/*.json
+data/**/*.png
 data/**/tiffs
 *.egg-info
 __pycache__
