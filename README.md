@@ -1,3 +1,23 @@
+# Introduction 
+
+Applying map text spotting models to historic Ordnance Survey "County Series" map data.
+
+# Set-up Instructions
+
+1. Clone this Repo
+1. Install the requirements
+
+```terminal
+pip install -r ./requirements.txt
+```
+
+3. Create a `.env` file and fill out the environment variables:
+
+```env
+LOCAL_DIR = # absolute path for where datasets and outputs should be saved. File structures in LOCAL_DIR should match the file structures in the /data/ and /outputs/ folders of the repo.
+EDINA_DOWNLOAD_DIR = # absolute path for where EDINA datasets are stored.
+```
+
 ## Commands
 
 1. Splitting TIFF files into separate PNGs:
@@ -42,7 +62,7 @@ python scripts/process_ambiguous_ToponymExtractor_predictions.py outputs/toponym
 
 9. (Step 6 retry) Combine prediction masks
 ```cmd
-python scripts/combine_predictions.py outputs/toponym-extractor/revised outputs/toponym-extractor/postprocessed-v2/Predictions outputs/toponym-extractor/ambiguous-v2/Refined
+python scripts/combine_predictions.py outputs/toponym-extractor/revised-v2 outputs/toponym-extractor/postprocessed-v2/Predictions outputs/toponym-extractor/ambiguous-v2/Refined
 ```
 
 10. Convert combined predictions and manually labelled data back to ICDAR 2025 format
