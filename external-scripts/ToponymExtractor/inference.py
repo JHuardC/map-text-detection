@@ -31,11 +31,11 @@ def get_default_config():
 
         # SETTINGS (default values work well for most cases)
         'pyramid_scan_num_layers': 1, # Significantly slows down detection speed
-        'pyramid_min_patch_resolution': 384, # Lower this value for maps with smaller text
+        'pyramid_min_patch_resolution': 750, # Lower this value for maps with smaller text
         'pyramid_max_patch_resolution': 2048, # Model only run on min_patch_resolution if pyramid_scan_num_layers = 1
 
         'word_spotting_score_threshold': 0.6, # 0 to 1, lower this value if some words are missed
-        'word_spotting_image_batch_size': 8, # For 8G VRAM. Lower this value if CUDA OOM error occurs, increase it if you have a powerful GPU
+        'word_spotting_image_batch_size': 4, # For 8G VRAM. Lower this value if CUDA OOM error occurs, increase it if you have a powerful GPU
 
         # Save intermediate results
         'save_stacked_detection': True,
@@ -265,6 +265,7 @@ def to_rumsey_format(toponyms, map_rel_path):
             vertices = [[polygon_x[i], polygon_y[i]] for i in range(len(polygon_x))]
             new_group.append({
                 'vertices': vertices,
+                "center_bezier_pts": w["center_bezier_pts"],
                 'text': w['text'],
                 'score': w['score']
             })
